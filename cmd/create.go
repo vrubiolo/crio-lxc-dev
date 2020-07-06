@@ -295,6 +295,19 @@ func makeSyncFifo(dir string) error {
 	return nil
 }
 
+func waitContainer(c *lxc.Container, state lxc.State, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	// liblxc.Wait / go-libxc.Wait do not block when container is stopped. BUG in liblxc ?
+	// https://github.com/lxc/lxc/issues/2027
+	for time.Now().Before(deadline) {
+		if c.State() == state {
+			return true
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+	return false
+}
+
 func startContainer(c *lxc.Container, spec *specs.Spec) error {
 	binary, err := os.Readlink("/proc/self/exe")
 	if err != nil {
@@ -317,8 +330,10 @@ func startContainer(c *lxc.Container, spec *specs.Spec) error {
 
 	cmdErr := cmd.Start()
 
+	log.Debugf("LXC container PID %d", c.InitPid())
+
 	if cmdErr == nil {
-		if !c.Wait(lxc.RUNNING, 30*time.Second) {
+		if !waitContainer(c, lxc.RUNNING, 30*time.Second) {
 			cmdErr = fmt.Errorf("Container failed to initialize")
 		}
 	}
