@@ -44,6 +44,10 @@ func main() {
 			Usage: "set the lxc path to use",
 			Value: "/var/lib/lxc",
 		},
+		cli.BoolFlag{
+			Name:  "systemd-cgroup",
+			Usage: "enable systemd cgroup (unimplemented stub for conmon)",
+		},
 	}
 
 	app.Before = func(ctx *cli.Context) error {
