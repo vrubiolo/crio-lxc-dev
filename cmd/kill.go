@@ -93,7 +93,7 @@ func doKill(ctx *cli.Context) error {
 
 	}
 
-	if c.Running() && checkHackyPreStart(c) == "started" {
+	if c.Running() { //&& checkHackyPreStart(c) == "started" {
 		pid := c.InitPid()
 
 		if err := unix.Kill(pid, signalMap[ctx.String("signal")]); err != nil {
