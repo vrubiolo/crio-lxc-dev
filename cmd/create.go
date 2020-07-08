@@ -227,8 +227,35 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	}
 
 	for _, ms := range spec.Mounts {
+		// ignore cgroup mount, lxc automouts this even with lxc.rootfs.managed = 0
+		// conf.c:mount_entry:1854 - Device or resource busy - Failed to mount "cgroup" on "/usr/lib/x86_64-linux-gnu/lxc/rootfs/sys/fs/cgroup"
+		if ms.Type == "cgroup" {
+			continue
+		}
+
+		// create target files and directories
+		info, err := os.Stat(ms.Source)
+		if err == nil {
+			if info.IsDir() {
+				ms.Options = append(ms.Options, "create=dir")
+			} else {
+				ms.Options = append(ms.Options, "create=file")
+			}
+		} else {
+			// This case catches all kind of virtual and remote filesystems (/dev/pts, /dev/shm, sysfs, procfs, dev ...)
+			// It can not be a file because the source file for a bind mount must exist.
+			if os.IsNotExist(err) {
+				ms.Options = append(ms.Options, "create=dir")
+			} else {
+				log.Debugf("failed to stat source %s of mountpoint %s: %s", ms.Source, ms.Destination, err)
+			}
+		}
+
 		opts := strings.Join(ms.Options, ",")
-		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, opts)
+		// Make mount paths relative to container root https://github.com/lxc/lxc/issues/2276
+		dest := strings.TrimLeft(ms.Destination, "/")
+		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, dest, ms.Type, opts)
+
 		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 			return errors.Wrap(err, "failed to set mount config")
 		}
