@@ -50,14 +50,16 @@ func main() {
 		},
 	}
 
+	log.SetLevel(log.InfoLevel)
+
 	app.Before = func(ctx *cli.Context) error {
 		LXC_PATH = ctx.String("lxc-path")
-
 		debug = ctx.Bool("debug")
+		if debug {
+			log.SetLevel(log.DebugLevel)
+		}
 		return nil
 	}
-
-	log.SetLevel(log.InfoLevel)
 
 	if err := app.Run(os.Args); err != nil {
 		format := "error: %v\n"
