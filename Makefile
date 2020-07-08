@@ -17,6 +17,9 @@ check: crio-lxc
 	go test ./...
 	PACKAGES_DIR=$(PACKAGES_DIR) sudo -E "PATH=$$PATH" bats -t $(patsubst %,test/%.bats,$(TEST))
 
+%.bats: crio-lxc
+	PACKAGES_DIR=$(PACKAGES_DIR) sudo -E "PATH=$$PATH" bats -t test/$@
+
 .PHONY: vendorup
 vendorup:
 	go get -u

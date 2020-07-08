@@ -51,3 +51,25 @@ You'll also need conntrack installed:
 ```
 apt install conntrack
 ```
+
+You have to install [bats](https://github.com/bats-core/bats-core) to run the tests.
+On debian you can install bats with:
+	
+	apt-get install bats
+
+
+To keep the tempdir of of a test run, you have to create the lockfile `.keeptempdirs` 
+in the top-level of this repository.
+
+	touch .keeptempdirs
+
+To debug `crictl` calls within a test run:
+
+	CRICTLDEBUG="-D" make basic.bats
+
+`bats` does not show any output when the test was successful.
+The logfile is created in /tmp and deleted when the test was successful.
+To watch the test output while the test is running:
+
+	tail -f /tmp/bats.*.log
+
