@@ -24,6 +24,7 @@ func main() {
 		startCmd,
 		killCmd,
 		deleteCmd,
+		execCmd,
 	}
 
 	app.Flags = []cli.Flag{
