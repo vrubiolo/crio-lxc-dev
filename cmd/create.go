@@ -202,6 +202,48 @@ func doCreate(ctx *cli.Context) error {
 	return nil
 }
 
+func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	// https://github.com/kubernetes/kubernetes/blob/a38a02792b55942177ee676a5e1993b18a8b4b0a/pkg/kubelet/apis/cri/runtime/v1alpha2/api.proto#L541
+	//  // Privileged mode implies the following specific options are applied:
+	// 1. All capabilities are added.
+	// 2. Sensitive paths, such as kernel module paths within sysfs, are not masked.
+	// 3. Any sysfs and procfs mounts are mounted RW.
+	// 4. Apparmor confinement is not applied.
+	// 5. Seccomp restrictions are not applied.
+	// 6. The device cgroup does not restrict access to any devices.
+	// 7. All devices from the host's /dev are available within the container.
+	// 8. SELinux restrictions are not applied (e.g. label=disabled).
+	// security
+	// FIXME Kubelet does not set the 'io.kubernetes.cri-o.PrivilegedRuntime"
+	// https://github.com/containers/podman/blob/8704b78a6fbb953acb6b74d1671d5ad6456bf81f/pkg/annotations/annotations.go#L64
+
+	aaprofile := spec.Process.ApparmorProfile
+	if aaprofile == "" {
+		aaprofile = "generated"
+	}
+	if err := c.SetConfigItem("lxc.apparmor.profile", "generated"); err != nil {
+		//if err := c.SetConfigItem("lxc.apparmor.profile", "unconfined"); err != nil {
+		return errors.Wrapf(err, "faield to set apparmor.profile")
+	}
+	if aaprofile == "generated" {
+		// TODO Create apparmor profile from spec.Linux.Readonly and MaskedPaths
+		// set lxc.apparmor.raw
+		// see man apparmor.d
+	}
+
+	if err := c.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
+		return errors.Wrap(err, "failed to set lxc.proc.oom_score_adj")
+	}
+
+	if spec.Process.NoNewPrivileges {
+		if err := c.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+			return errors.Wrapf(err, "failed to set lxc.no_new_privs")
+		}
+	}
+
+	return nil
+}
+
 func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if ctx.Bool("debug") {
 		c.SetVerbosity(lxc.Verbose)
@@ -294,6 +336,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	if err := configureNamespaces(c, spec); err != nil {
 		return errors.Wrap(err, "failed to configure namespaces")
+	}
+
+	if ctx.Bool("systemd-cgroup") {
+		c.SetConfigItem("lxc.cgroup.root", "system.slice")
+	}
+
+	if err := configureContainerSecurity(ctx, c, spec); err != nil {
+		return errors.Wrap(err, "failed to configure container security")
 	}
 
 	// capabilities?
