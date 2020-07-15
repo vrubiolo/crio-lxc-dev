@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	stdlog "log"
 	"os"
 
 	"github.com/apex/log"
@@ -47,17 +48,35 @@ func main() {
 		},
 		cli.BoolFlag{
 			Name:  "systemd-cgroup",
-			Usage: "enable systemd cgroup (unimplemented stub for conmon)",
+			Usage: "enable systemd cgroup",
 		},
 	}
 
 	log.SetLevel(log.InfoLevel)
 
+	var logFile *os.File
 	app.Before = func(ctx *cli.Context) error {
 		LXC_PATH = ctx.String("lxc-path")
 		debug = ctx.Bool("debug")
 		if debug {
 			log.SetLevel(log.DebugLevel)
+		}
+		logFilePath := ctx.String("log-file")
+		if logFilePath != "" {
+			f, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
+			if err != nil {
+				log.Errorf("failed to open log file %s: %s", logFilePath, err)
+			} else {
+				logFile = f
+				stdlog.SetOutput(logFile)
+			}
+		}
+		return nil
+	}
+
+	app.After = func(ctx *cli.Context) error {
+		if logFile != nil {
+			return logFile.Close()
 		}
 		return nil
 	}
