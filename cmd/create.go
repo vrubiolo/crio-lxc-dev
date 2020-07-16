@@ -292,27 +292,37 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 				log.Debugf("failed to stat source %s of mountpoint %s: %s", ms.Source, ms.Destination, err)
 			}
 		}
-
 		opts := strings.Join(ms.Options, ",")
 
-		// Fix failing mounts due to symlink protection
-		// CVE-2015-1335: Protect container mounts against symlinks
-		// https://github.com/lxc/lxc/commit/592fd47a6245508b79fe6ac819fe6d3b2c1289be
-		// mount targets that contain symlinks must be resolved
-		dest := ms.Destination
-		if strings.HasPrefix(dest, "/var/run") {
-			dest = strings.TrimPrefix(dest, "/var")
+		mountDest := ms.Destination
+
+		// Resolve mount mountDestinatination paths containing symlinks.
+		// Symlinks in mount mountDestination paths are not allowed in LXC.
+		// See CVE-2015-1335: Protect container mounts against symlinks
+		// and https://github.com/lxc/lxc/commit/592fd47a6245508b79fe6ac819fe6d3b2c1289be
+		// 
+		// So mount targets that contain symlinks must be resolved.
+		// e.g k8s service account tokens are mounted to /var/run/secrets/kubernetes.io/serviceaccount
+		// TODO Check whether a recursive and generic implementation is required!
+		if strings.HasPrefix(mountDest, "/var/run/")  {
+			stat, err := os.Lstat(filepath.Join(spec.Root.Path, "/var/run/"))
+			if err == nil {
+				if stat.Mode() & os.ModeSymlink != 0 {
+					// resolve the symlink from /var/run to /run
+					mountDest = strings.TrimPrefix(mountDest, "/var")
+				}
+			}
 		}
 
-		// Either make mount destination paths relative to container or prepend the root path to them,
-		// otherwise lxc ignores the mount points.
-		// Hmmm, why does lxc not prepend the rootfs itself ?
-		// https://github.com/lxc/lxc/issues/2276
-		//dest := strings.TrimLeft(ms.Destination, "/")
+		// Mount destinations must be either relative to the container root or absolute to 
+		// the directory on the host containing the rootfs.
+		// LXC simply ignores relative mounts paths to an absolute rootfs.
 
-		dest = filepath.Join(spec.Root.Path, dest)
+		// See https://github.com/lxc/lxc/issues/2276
+		// See man lxc.container.conf #MOUNT POINTS
+		mountDest = filepath.Join(spec.Root.Path, mountDest)
 
-		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, dest, ms.Type, opts)
+		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, mountDest, ms.Type, opts)
 		log.Debugf("adding mount entry %q", mnt)
 
 		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
