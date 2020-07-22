@@ -16,6 +16,7 @@ import (
 	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
+	"github.com/segmentio/ksuid"
 	"github.com/urfave/cli"
 
 	lxc "gopkg.in/lxc/go-lxc.v2"
@@ -90,12 +91,31 @@ const (
 
 func emitFifoWaiter(file string) error {
 	fifoWaiter := fmt.Sprintf(`#!/bin/sh
-stat /syncfifo
 echo "%s" | tee /syncfifo
-exec $@
+echo "Sourcing command file $1"
+echo "-----------------------"
+cat $1
+echo "-----------------------"
+. $1
 `, SYNC_FIFO_CONTENT)
 
 	return ioutil.WriteFile(file, []byte(fifoWaiter), 0755)
+}
+
+// Write the container init command to a file.
+// This file is then sourced by the file /syncfifo on container startup.
+// Every command argument is quoted so `exec` can process them properly.
+func emitCmdFile(cmdFile string, args ...string) error {
+	// https://stackoverflow.com/questions/33887194/how-to-set-multiple-commands-in-one-yaml-file-with-kubernetes
+	buf := strings.Builder{}
+	buf.WriteString("exec")
+	for _, arg := range args {
+		buf.WriteRune(' ')
+		buf.WriteRune('"')
+		buf.WriteString(arg)
+		buf.WriteRune('"')
+	}
+	return ioutil.WriteFile(cmdFile, []byte(buf.String()), 0640)
 }
 
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -352,8 +372,13 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set hostname")
 	}
 
-	argsString := "/fifo-wait " + strings.Join(spec.Process.Args, " ")
-	if err := c.SetConfigItem("lxc.execute.cmd", argsString); err != nil {
+	cmd := fmt.Sprintf("/mycmd.%s", ksuid.New().String())
+	err = emitCmdFile(path.Join(spec.Root.Path, cmd), spec.Process.Args...)
+	if err != nil {
+		return errors.Wrapf(err, "could not write command file")
+	}
+
+	if err := c.SetConfigItem("lxc.execute.cmd", "/fifo-wait "+cmd); err != nil {
 		return errors.Wrap(err, "failed to set lxc.execute.cmd")
 
 	}
