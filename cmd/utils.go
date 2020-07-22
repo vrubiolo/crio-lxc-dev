@@ -86,3 +86,54 @@ func RunCommand(args ...string) error {
 	}
 	return nil
 }
+
+func resolveRootfsSymlinks(rootfs string, dst string) (string, error) {
+	stat, err := os.Lstat(dst)
+	if err != nil {
+		return dst, err
+	}
+	if stat.Mode()&os.ModeSymlink == 0 {
+		return dst, nil // not a symlink
+	}
+	target, err := os.Readlink(dst)
+	if err != nil {
+		return dst, err
+	}
+	if !strings.HasPrefix(target, rootfs) {
+		return filepath.Join(rootfs, target), nil
+	}
+	return target, nil
+}
+
+// resolveMountDestination resolves mount destination paths for LXC.
+//
+// Symlinks in mount mount destination paths are not allowed in LXC.
+// See CVE-2015-1335: Protect container mounts against symlinks
+// and https://github.com/lxc/lxc/commit/592fd47a6245508b79fe6ac819fe6d3b2c1289be
+// Mount targets that contain symlinks should be resolved relative to the container rootfs.
+// e.g k8s service account tokens are mounted to /var/run/secrets/kubernetes.io/serviceaccount
+// but /var/run is (mostly) a symlink to /run, so LXC denies to mount the serviceaccount token.
+//
+// The mount destination must be either relative to the container root or absolute to
+// the directory on the host containing the rootfs.
+// LXC simply ignores relative mounts paths to an absolute rootfs.
+// See man lxc.container.conf #MOUNT POINTS
+//
+// The mount option `create=dir` should be set when the error os.ErrNotExist is returned.
+// The non-existent directories are then automatically created by LXC.
+func resolveMountDestination(rootfs string, dst string) (string, error) {
+	dst = strings.TrimPrefix(dst, "/")
+	entries := strings.Split(dst, "/")
+	dstPath := rootfs
+	for i, entry := range entries {
+		dstPath = filepath.Join(dstPath, entry)
+		resolved, err := resolveRootfsSymlinks(rootfs, dstPath)
+		dstPath = resolved
+		if err != nil {
+			// The already resolved path is concatenated with the remaining path to be resolved,
+			// if resolution of path fails at some point.
+			return filepath.Join(dstPath, filepath.Join(entries[i+1:]...)), err
+		}
+	}
+	return dstPath, nil
+}
