@@ -248,6 +248,11 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
+	// crio deletes the working directory so lxc should not do this itself
+	//if err := c.SetConfigItem("lxc.ephemeral", "1"); err != nil {
+	//	return errors.Wrapf(err, "failed to set lxc.ephemeral")
+	//}
+
 	return nil
 }
 
