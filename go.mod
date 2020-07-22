@@ -7,6 +7,7 @@ require (
 	github.com/onsi/ginkgo v1.8.0 // indirect
 	github.com/opencontainers/runtime-spec v1.0.1
 	github.com/pkg/errors v0.8.1
+	github.com/segmentio/ksuid v1.0.3
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/urfave/cli v1.20.0
 	golang.org/x/crypto v0.0.0-20190621222207-cc06ce4a13d4 // indirect
