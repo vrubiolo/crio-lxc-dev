@@ -236,8 +236,10 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		//	if err := c.SetConfigItem("lxc.apparmor.raw", aaprofile); err != nil {
 	}
 
-	if err := c.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
-		return errors.Wrap(err, "failed to set lxc.proc.oom_score_adj")
+	if spec.Process.OOMScoreAdj != nil {
+		if err := c.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
+			return errors.Wrap(err, "failed to set lxc.proc.oom_score_adj")
+		}
 	}
 
 	if spec.Process.NoNewPrivileges {
