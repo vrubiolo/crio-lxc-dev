@@ -515,6 +515,32 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
+	rootmnt := spec.Root.Path
+	if item := c.ConfigItem("lxc.rootfs.mount"); len(item) > 0 {
+		rootmnt = item[0]
+	}
+
+	for _, p := range spec.Linux.MaskedPaths {
+		// see https://github.com/opencontainers/runc/blob/64416d34f30eaf69af6938621137b393ada63a16/libcontainer/container_linux.go#L855
+		// Existing files are masked with the hosts null device /dev/null
+		// If the path to mask is a directory we make it readonly instead, since
+		// The `optional` mount option is set to let lxc skip over invalid / inaccessible paths.
+
+		// will fail if target is a directory, maybe use apparmor instead ?
+		mnt := fmt.Sprintf("%s %s %s %s", "/dev/null", strings.TrimLeft(p, "/"), "none", "bind,optional")
+		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+			return errors.Wrapf(err, "failed to mask path %s", p)
+		}
+	}
+	// lxc handles read-only remount automatically, so no need for an additional remount entry
+	for _, p := range spec.Linux.ReadonlyPaths {
+		src := filepath.Join(rootmnt, p)
+		mnt := fmt.Sprintf("%s %s %s %s", src, strings.TrimLeft(p, "/"), "none", "bind,ro,optional")
+		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+			return errors.Wrapf(err, "failed to mount %s readonly", p)
+		}
+	}
+
 	mnt := fmt.Sprintf("%s %s none ro,bind,create=file", path.Join(LXC_PATH, c.Name(), SYNC_FIFO_PATH), strings.Trim(SYNC_FIFO_PATH, "/"))
 	if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 		return errors.Wrap(err, "failed to set syncfifo mount config entry")
