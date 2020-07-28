@@ -245,12 +245,211 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-	// crio deletes the working directory so lxc should not do this itself
-	//if err := c.SetConfigItem("lxc.ephemeral", "1"); err != nil {
-	//	return errors.Wrapf(err, "failed to set lxc.ephemeral")
-	//}
+	// Do not set "lxc.ephemeral=1" crio manages the container root
 
+	// Set the capabilities to keep / drop.
+	// See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
+	// https://blog.container-solutions.com/linux-capabilities-in-practice
+	// https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work
+	keepCaps := "none"
+	if spec.Process.Capabilities != nil {
+		var caps []string
+		for _, c := range spec.Process.Capabilities.Permitted {
+			lcCapName := strings.TrimPrefix(strings.ToLower(c), "cap_")
+			caps = append(caps, lcCapName)
+		}
+		keepCaps = strings.Join(caps, " ")
+	}
+
+	if err := c.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
+		return errors.Wrapf(err, "failed to set lxc.cap.keep")
+	}
+
+	if err := c.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
+		return errors.Wrapf(err, "failed to set lxc.init.uid")
+	}
+	if err := c.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
+		return errors.Wrapf(err, "failed to set lxc.init.uid")
+	}
+
+	// See `man lxc.container.conf` lxc.idmap.
+	for _, m := range spec.Linux.UIDMappings {
+		if err := c.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+			return errors.Wrapf(err, "failed to set lxc.idmap")
+		}
+	}
+
+	for _, m := range spec.Linux.GIDMappings {
+		if err := c.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+			return errors.Wrapf(err, "failed to set lxc.idmap")
+		}
+	}
+
+	return configureCgroupResources(ctx, c, spec)
+}
+
+func ensureDevNull(linux *specs.Linux) {
+	for _, dev := range linux.Devices {
+		if dev.Path == "/dev/null" {
+			return
+		}
+	}
+	mode := os.ModePerm
+	var uid, gid uint32 = 0, 0
+	devNull := specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3, FileMode: &mode, UID: &uid, GID: &gid}
+	linux.Devices = append(linux.Devices, devNull)
+}
+
+func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	linux := spec.Linux
+
+	if ctx.Bool("systemd-cgroup") {
+		c.SetConfigItem("lxc.cgroup.root", "system.slice")
+	}
+
+	if linux.CgroupsPath != "" {
+		c.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath)
+	}
+
+	c.SetConfigItem("lxc.cgroup.relative", "1")
+
+	// disable automatic device population
+	c.SetConfigItem("lxc.autodev", "0")
+	// FIXME this results in lxc warnings
+	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
+	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
+	if len(spec.Linux.Devices) > 0 {
+		if err := addHookCreateDevices(ctx, c, spec); err != nil {
+			return errors.Wrapf(err, "failed to add create devices hook")
+		}
+	}
+
+	// Set cgroup device permissions.
+	// Device rule parsing in LXC is not well documented in lxc.container.conf
+	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
+	for _, dev := range linux.Resources.Devices {
+		key := "lxc.cgroup.devices.deny"
+		if dev.Allow {
+			key = "lxc.cgroup.devices.allow"
+		}
+
+		devType := "a" // 'type' is a (all), c (char), or b (block).
+		if dev.Type != "" {
+			devType = dev.Type
+		}
+
+		maj := "*"
+		if dev.Major != nil {
+			maj = fmt.Sprintf("%d", *dev.Major)
+		}
+
+		min := "*"
+		if dev.Minor != nil {
+			min = fmt.Sprintf("%d", *dev.Minor)
+		}
+		val := fmt.Sprintf("%s %s:%s %s", devType, maj, min, dev.Access)
+		if err := c.SetConfigItem(key, val); err != nil {
+			return errors.Wrapf(err, "failed to set %s", key)
+		}
+	}
+
+	// allow /dev/null
+	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw"); err != nil {
+		return errors.Wrapf(err, "failed to allow access to /dev/null")
+	}
+
+	// Memory restriction configuration
+	if mem := linux.Resources.Memory; mem != nil {
+		log.Debugf("TODO configure cgroup memory controller")
+	}
+	// CPU resource restriction configuration
+	if cpu := linux.Resources.CPU; cpu != nil {
+		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
+		log.Debugf("configure cgroup cpu controller")
+		if cpu.Shares != nil && *cpu.Shares > 0 {
+			if err := c.SetConfigItem("lxc.cgroup.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.shares")
+			}
+		}
+		if cpu.Quota != nil && *cpu.Quota > 0 {
+			if err := c.SetConfigItem("lxc.cgroup.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.cfs_quota_us")
+			}
+		}
+		if cpu.Period != nil && *cpu.Period != 0 {
+			if err := c.SetConfigItem("lxc.cgroup.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.cfs_period_us")
+			}
+		}
+		if cpu.Cpus != "" {
+			if err := c.SetConfigItem("lxc.cgroup.cpuset.cpus", cpu.Cpus); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpuset.cpus")
+			}
+		}
+		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
+			if err := c.SetConfigItem("lxc.cgroup.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.rt_period_us")
+			}
+		}
+		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
+			if err := c.SetConfigItem("lxc.cgroup.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
+				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.rt_runtime_us")
+			}
+		}
+		// Mems string `json:"mems,omitempty"`
+	}
+
+	// Task resource restriction configuration.
+	if pids := linux.Resources.Pids; pids != nil {
+		if err := c.SetConfigItem("lxc.cgroup.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
+			return errors.Wrap(err, "failed to set lxc.cgroup.pids.max")
+		}
+	}
+	// BlockIO restriction configuration
+	if blockio := linux.Resources.BlockIO; blockio != nil {
+		log.Debugf("TODO configure cgroup blockio controller")
+	}
+	// Hugetlb limit (in bytes)
+	if hugetlb := linux.Resources.HugepageLimits; hugetlb != nil {
+		log.Debugf("TODO configure cgroup hugetlb controller")
+	}
+	// Network restriction configuration
+	if net := linux.Resources.Network; net != nil {
+		log.Debugf("TODO configure cgroup network controllers")
+	}
 	return nil
+}
+
+func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	hookPath := filepath.Join(spec.Root.Path, "hook_create_devices.sh")
+	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	//ensureDevNull(spec.Linux)
+
+	fmt.Fprintln(f, "#!/bin/sh")
+	for _, dev := range spec.Linux.Devices {
+		mode := os.FileMode(0400) // umask ?
+		if dev.FileMode != nil {
+			mode = *dev.FileMode
+		}
+		uid := spec.Process.User.UID
+		if dev.UID != nil {
+			uid = *dev.UID
+		}
+		gid := spec.Process.User.GID
+		if dev.GID != nil {
+			gid = *dev.GID
+		}
+		devPath := filepath.Join(spec.Root.Path, dev.Path)
+		fmt.Fprintf(f, "mknod -m %#o %s %s %d %d\n", mode, devPath, dev.Type, dev.Major, dev.Minor)
+		fmt.Fprintf(f, "chown %d:%d %s\n", uid, gid, devPath)
+	}
+	// The script is run within the host namespace, after all rootfs setup is completed.
+	return c.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
 func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -262,8 +461,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to configure logging")
 	}
 
-	// rootfs
-	// todo Root.Readonly? - use lxc.rootfs.options
 	if err := c.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
 		return errors.Wrapf(err, "failed to set rootfs: '%s'", spec.Root.Path)
 	}
@@ -358,15 +555,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to configure namespaces")
 	}
 
-	if ctx.Bool("systemd-cgroup") {
-		c.SetConfigItem("lxc.cgroup.root", "system.slice")
-	}
-
 	if err := configureContainerSecurity(ctx, c, spec); err != nil {
 		return errors.Wrap(err, "failed to configure container security")
 	}
-
-	// capabilities?
 
 	// if !spec.Process.Terminal {
 	// 	passFdsToContainer()
