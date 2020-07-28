@@ -102,6 +102,7 @@ echo "-----------------------"
 	return ioutil.WriteFile(file, []byte(fifoWaiter), 0755)
 }
 
+
 // Write the container init command to a file.
 // This file is then sourced by the file /syncfifo on container startup.
 // Every command argument is quoted so `exec` can process them properly.
@@ -258,6 +259,7 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	// See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
 	// https://blog.container-solutions.com/linux-capabilities-in-practice
 	// https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work
+
 	keepCaps := "none"
 	if spec.Process.Capabilities != nil {
 		var caps []string
@@ -321,8 +323,9 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	c.SetConfigItem("lxc.cgroup.relative", "1")
 
 	// disable automatic device population
-	c.SetConfigItem("lxc.autodev", "0")
-	// FIXME this results in lxc warnings
+	// autodev is required
+	c.SetConfigItem("lxc.autodev", "1")
+	// if autodev is disable lxc spits out these warnings:
 	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
 	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
 	if len(spec.Linux.Devices) > 0 {
@@ -363,6 +366,14 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// allow /dev/null
 	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw"); err != nil {
 		return errors.Wrapf(err, "failed to allow access to /dev/null")
+	}
+	// /dev/zero
+	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
+		return errors.Wrapf(err, "failed to allow access to /dev/zero")
+	}
+	// /dev/urandom
+	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
+		return errors.Wrapf(err, "failed to allow access to /dev/urandom")
 	}
 
 	// Memory restriction configuration
@@ -507,6 +518,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 		opts := strings.Join(ms.Options, ",")
 
+		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
+		// "github.com/docker/docker/pkg/symlink"
 		mountDest, err := resolveMountDestination(spec.Root.Path, ms.Destination)
 		if err != nil {
 			log.Debugf("resolveMountDestination: %s --> %s (err:%s)", ms.Destination, mountDest, err)
