@@ -223,17 +223,14 @@ func doCreate(ctx *cli.Context) error {
 }
 
 func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	// Crio sets the apparmor profile from the container spec.
+	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
 	aaprofile := spec.Process.ApparmorProfile
 	if aaprofile == "" {
-		aaprofile = "generated"
+		aaprofile = "unconfined"
 	}
 	if err := c.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
 		return errors.Wrapf(err, "failed to set apparmor.profile to %s", aaprofile)
-	}
-	if aaprofile == "generated" {
-		// TODO Create apparmor profile from the spec (honoring Linux.Readonly and Linux.MaskedPaths)
-		// see man apparmor.d
-		//	if err := c.SetConfigItem("lxc.apparmor.raw", aaprofile); err != nil {
 	}
 
 	if spec.Process.OOMScoreAdj != nil {
