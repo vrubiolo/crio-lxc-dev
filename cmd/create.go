@@ -109,10 +109,19 @@ func emitCmdFile(cmdFile string, args ...string) error {
 	// https://stackoverflow.com/questions/33887194/how-to-set-multiple-commands-in-one-yaml-file-with-kubernetes
 	buf := strings.Builder{}
 	buf.WriteString("exec")
+	multiline := false
 	for _, arg := range args {
 		buf.WriteRune(' ')
 		buf.WriteRune('"')
-		buf.WriteString(arg)
+		for i, r := range arg {
+			if r == '\n' {
+				multiline = true
+			}
+			if i > 0 && !multiline && r == '"' && arg[i-1] != '\\' {
+				buf.WriteRune('\\')
+			}
+			buf.WriteRune(r)
+		}
 		buf.WriteRune('"')
 	}
 	return ioutil.WriteFile(cmdFile, []byte(buf.String()), 0640)
