@@ -68,9 +68,7 @@ func doDelete(ctx *cli.Context) error {
 	// this appears to contradict the runtime spec:
 
 	// "Note that resources associated with the container,
-	// but not created by this container, MUST NOT be deleted.Note
-	// that resources associated with the container, but not
-	// created by this container, MUST NOT be deleted.
+	// but not created by this container, MUST NOT be deleted."
 
 	if err := c.Destroy(); err != nil {
 		return errors.Wrap(err, "failed to delete container.")

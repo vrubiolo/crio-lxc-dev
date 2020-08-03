@@ -253,7 +253,11 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-	// Do not set "lxc.ephemeral=1" crio manages the container root
+	// Do not set "lxc.ephemeral=1" since resources not created by
+	// the container runtime MUST NOT be deleted by the container runtime.
+	if err := c.SetConfigItem("lxc.ephemeral", "0"); err != nil {
+		return errors.Wrapf(err, "failed to set lxc.ephemeral=0")
+	}
 
 	// Set the capabilities to keep / drop.
 	// See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
