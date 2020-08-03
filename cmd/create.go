@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -172,7 +171,6 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 }
 
 func doCreate(ctx *cli.Context) error {
-	pidfile := ctx.String("pid-file")
 	containerID := ctx.Args().Get(0)
 	if len(containerID) == 0 {
 		fmt.Fprintf(os.Stderr, "missing container ID\n")
@@ -211,21 +209,20 @@ func doCreate(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	if err := startContainer(c, spec); err != nil {
-		return errors.Wrap(err, "failed to start the container init")
+	cmd, err := startContainer(c, spec)
+	if err != nil {
+		return errors.Wrap(err, "failed to start the container")
 	}
 
+	// conmon always passes a PID on create ?
+	pidfile := ctx.String("pid-file")
 	if pidfile != "" {
-		err := os.MkdirAll(path.Dir(pidfile), 0755)
+		// conmon requires the PID from the crio-lxc wrapper
+		err := createPidFile(pidfile, cmd.Process.Pid)
 		if err != nil {
-			return errors.Wrapf(err, "Couldn't create pid file directory for %s", pidfile)
-		}
-		err = ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", c.InitPid())), 0755)
-		if err != nil {
-			return errors.Wrapf(err, "Couldn't create pid file %s", pidfile)
+			return errors.Wrapf(err, "failed to create pid file %s", pidfile)
 		}
 	}
-
 	log.Infof("created container %s in lxcdir %s", containerID, LXC_PATH)
 	return nil
 }
@@ -636,23 +633,10 @@ func makeSyncFifo(dir string) error {
 	return nil
 }
 
-func waitContainer(c *lxc.Container, state lxc.State, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	// liblxc.Wait / go-libxc.Wait do not block when container is stopped. BUG in liblxc ?
-	// https://github.com/lxc/lxc/issues/2027
-	for time.Now().Before(deadline) {
-		if c.State() == state {
-			return true
-		}
-		time.Sleep(time.Millisecond * 50)
-	}
-	return false
-}
-
-func startContainer(c *lxc.Container, spec *specs.Spec) error {
+func startContainer(c *lxc.Container, spec *specs.Spec) (*exec.Cmd, error) {
 	binary, err := os.Readlink("/proc/self/exe")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	cmd := exec.Command(
@@ -669,15 +653,5 @@ func startContainer(c *lxc.Container, spec *specs.Spec) error {
 		cmd.Stderr = os.Stderr
 	}
 
-	cmdErr := cmd.Start()
-
-	log.Debugf("LXC container PID %d", c.InitPid())
-
-	if cmdErr == nil {
-		if !waitContainer(c, lxc.RUNNING, 30*time.Second) {
-			cmdErr = fmt.Errorf("Container failed to initialize")
-		}
-	}
-
-	return cmdErr
+	return cmd, cmd.Start()
 }
