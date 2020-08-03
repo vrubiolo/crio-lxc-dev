@@ -137,3 +137,23 @@ func resolveMountDestination(rootfs string, dst string) (string, error) {
 	}
 	return dstPath, nil
 }
+
+// atomic file path creation
+func createPidFile(path string, pid int) error {
+	tmpDir := filepath.Dir(path)
+	tmpName := filepath.Join(tmpDir, fmt.Sprintf(".%s", filepath.Base(path)))
+
+	f, err := os.OpenFile(tmpName, os.O_RDWR|os.O_CREATE|os.O_EXCL|os.O_SYNC, 0640)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(f, "%d", pid)
+	if err != nil {
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
