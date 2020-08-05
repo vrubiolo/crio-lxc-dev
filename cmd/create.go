@@ -544,6 +544,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		rootmnt = item[0]
 	}
 
+	// LXC does not yet implement masking paths see https://github.com/lxc/lxc/issues/2282
 	for _, p := range spec.Linux.MaskedPaths {
 		// see https://github.com/opencontainers/runc/blob/64416d34f30eaf69af6938621137b393ada63a16/libcontainer/container_linux.go#L855
 		// Existing files are masked with the hosts null device /dev/null

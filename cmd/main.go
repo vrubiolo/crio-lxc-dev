@@ -55,6 +55,15 @@ func main() {
 	log.SetLevel(log.InfoLevel)
 
 	var logFile *os.File
+	defer func() {
+		if logFile != nil {
+			err := logFile.Close()
+			if err != nil {
+				println(err.Error())
+			}
+		}
+	}()
+
 	app.Before = func(ctx *cli.Context) error {
 		LXC_PATH = ctx.String("lxc-path")
 		debug = ctx.Bool("debug")
@@ -74,19 +83,12 @@ func main() {
 		return nil
 	}
 
-	app.After = func(ctx *cli.Context) error {
-		if logFile != nil {
-			return logFile.Close()
-		}
-		return nil
-	}
-
 	if err := app.Run(os.Args); err != nil {
 		format := "error: %v\n"
 		if debug {
 			format = "error: %+v\n"
 		}
-
+		log.Errorf("Cmdline: %s\nerror: %+v\n", os.Args, err)
 		fmt.Fprintf(os.Stderr, format, err)
 		os.Exit(1)
 	}
