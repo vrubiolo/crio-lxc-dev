@@ -73,3 +73,7 @@ To watch the test output while the test is running:
 
 	tail -f /tmp/bats.*.log
 
+Expand multi-line output int cri-o log (e.g stacktrace)
+
+echo "output" | sed 's/\\n\\t/\n/g' 
+
