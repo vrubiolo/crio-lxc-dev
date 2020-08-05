@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy-deployment
+  labels:
+    app: caddy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: caddy
+  template:
+    metadata:
+      labels:
+        app: caddy
+    spec:
+      containers:
+      - name: caddy
+        image: caddy:latest
+        ports:
+        - containerPort: 80
