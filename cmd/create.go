@@ -101,30 +101,38 @@ echo "-----------------------"
 	return ioutil.WriteFile(file, []byte(fifoWaiter), 0755)
 }
 
-
 // Write the container init command to a file.
 // This file is then sourced by the file /syncfifo on container startup.
 // Every command argument is quoted so `exec` can process them properly.
-func emitCmdFile(cmdFile string, args ...string) error {
+func emitCmdFile(spec *specs.Spec) (string, error) {
+	cmd := fmt.Sprintf("/mycmd.%s", ksuid.New().String())
+	cmdFile := path.Join(spec.Root.Path, cmd)
+
 	// https://stackoverflow.com/questions/33887194/how-to-set-multiple-commands-in-one-yaml-file-with-kubernetes
 	buf := strings.Builder{}
-	buf.WriteString("exec")
-	multiline := false
-	for _, arg := range args {
-		buf.WriteRune(' ')
-		buf.WriteRune('"')
-		for i, r := range arg {
-			if r == '\n' {
-				multiline = true
+	if len(spec.Process.Args) > 0 {
+		buf.WriteString("exec")
+		escape := []rune{'`','"','$', '\\'}
+
+		for _, arg := range spec.Process.Args {
+			buf.WriteRune(' ')
+			buf.WriteRune('"')
+
+			for i, r := range arg {
+				for _, er := range escape {
+					// escape unescaped quotes
+					if r == er && (i == 0 || arg[i-1] != '\\') {
+						buf.WriteRune('\\')
+						continue
+					}
+				}
+				buf.WriteRune(r)
 			}
-			if i > 0 && !multiline && r == '"' && arg[i-1] != '\\' {
-				buf.WriteRune('\\')
-			}
-			buf.WriteRune(r)
+			buf.WriteRune('"')
 		}
-		buf.WriteRune('"')
+		buf.WriteRune('\n')
 	}
-	return ioutil.WriteFile(cmdFile, []byte(buf.String()), 0640)
+	return cmd, ioutil.WriteFile(cmdFile, []byte(buf.String()), 0640)
 }
 
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -584,16 +592,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set hostname")
 	}
 
-	cmd := fmt.Sprintf("/mycmd.%s", ksuid.New().String())
-	err = emitCmdFile(path.Join(spec.Root.Path, cmd), spec.Process.Args...)
-	if err != nil {
+	if cmd, err := emitCmdFile(spec); err != nil {
 		return errors.Wrapf(err, "could not write command file")
+	} else {
+		if err := c.SetConfigItem("lxc.execute.cmd", "/fifo-wait "+cmd); err != nil {
+			return errors.Wrap(err, "failed to set lxc.execute.cmd")
+		}
 	}
 
-	if err := c.SetConfigItem("lxc.execute.cmd", "/fifo-wait "+cmd); err != nil {
-		return errors.Wrap(err, "failed to set lxc.execute.cmd")
-
-	}
 	if err := c.SetConfigItem("lxc.hook.version", "1"); err != nil {
 		return errors.Wrap(err, "failed to set hook version")
 	}
