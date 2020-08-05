@@ -105,6 +105,7 @@ __attribute__((constructor)) void internal(void)
 
 	status = spawn_container(name, lxcpath, config_path);
 
+	// similar to https://github.com/lxc/lxc/blob/ee555b28241279abbca68eac4aa2f5f51fae2026/src/lxc/tools/lxc_execute.c#L233
 	// Try and propagate the container's exit code.
 	if (WIFEXITED(status)) {
 		exit(WEXITSTATUS(status));
