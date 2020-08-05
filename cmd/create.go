@@ -60,7 +60,7 @@ func ensureShell(rootfs string) error {
 		return nil
 	}
 	var err error
-	err = RunCommand("mkdir", filepath.Join(rootfs, "bin"))
+	err = RunCommand("mkdir", "-p", filepath.Join(rootfs, "bin"))
 	if err != nil {
 		return errors.Wrapf(err, "Failed doing mkdir")
 	}
