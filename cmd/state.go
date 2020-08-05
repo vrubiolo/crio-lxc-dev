@@ -87,7 +87,7 @@ func doState(ctx *cli.Context) error {
 			}
 
 			cmdArgv := strings.Split(string(cmdline), "\x00")
-			if len(cmdArgv) > 2 && cmdArgv[0] == "/bin/sh" && cmdArgv[1] == "/fifo-wait" {
+			if len(cmdArgv) > 2 && cmdArgv[0] == "/bin/sh" && cmdArgv[1] == EXECUTE_CMD {
 				status = "created"
 			}
 		}

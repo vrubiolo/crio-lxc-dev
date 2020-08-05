@@ -15,7 +15,6 @@ import (
 	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
-	"github.com/segmentio/ksuid"
 	"github.com/urfave/cli"
 
 	lxc "gopkg.in/lxc/go-lxc.v2"
@@ -86,33 +85,29 @@ func ensureShell(rootfs string) error {
 const (
 	SYNC_FIFO_PATH    = "/syncfifo"
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
+	EXECUTE_CMD       = "/init.sh"
 )
 
-func emitFifoWaiter(file string) error {
-	fifoWaiter := fmt.Sprintf(`#!/bin/sh
-echo "%s" | tee /syncfifo
-echo "Sourcing command file $1"
-echo "-----------------------"
-cat $1
-echo "-----------------------"
-. $1
-`, SYNC_FIFO_CONTENT)
-
-	return ioutil.WriteFile(file, []byte(fifoWaiter), 0755)
-}
-
 // Write the container init command to a file.
-// This file is then sourced by the file /syncfifo on container startup.
-// Every command argument is quoted so `exec` can process them properly.
-func emitCmdFile(spec *specs.Spec) (string, error) {
-	cmd := fmt.Sprintf("/mycmd.%s", ksuid.New().String())
-	cmdFile := path.Join(spec.Root.Path, cmd)
-
-	// https://stackoverflow.com/questions/33887194/how-to-set-multiple-commands-in-one-yaml-file-with-kubernetes
+// The command file is then set as "lxc.execute.cmd"
+// Every command argument is quoted and shell specials are escaped
+// for `exec` to process them properly.
+func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 	buf := strings.Builder{}
+	buf.WriteString("#!/bin/sh\n")
+	fmt.Fprintf(&buf, "echo %q > %s\n", SYNC_FIFO_CONTENT, SYNC_FIFO_PATH)
+
+	for _, envVar := range spec.Process.Env {
+		keyVal := strings.SplitN(envVar, "=", 2)
+		if len(keyVal) != 2 {
+			return fmt.Errorf("Invalid environment variable %q", envVar)
+		}
+		fmt.Fprintf(&buf, "export %s=\"%s\"\n", keyVal[0], keyVal[1])
+	}
+
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
-		escape := []rune{'`','"','$', '\\'}
+		escape := []rune{'`', '"', '$', '\\'}
 
 		for _, arg := range spec.Process.Args {
 			buf.WriteRune(' ')
@@ -132,7 +127,13 @@ func emitCmdFile(spec *specs.Spec) (string, error) {
 		}
 		buf.WriteRune('\n')
 	}
-	return cmd, ioutil.WriteFile(cmdFile, []byte(buf.String()), 0640)
+
+	cmdFile := path.Join(spec.Root.Path, EXECUTE_CMD)
+	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0750)
+	if err != nil {
+		return err
+	}
+	return c.SetConfigItem("lxc.init.cmd", EXECUTE_CMD)
 }
 
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -495,12 +496,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
 	}
 
-	for _, envVar := range spec.Process.Env {
-		if err := c.SetConfigItem("lxc.environment", envVar); err != nil {
-			return fmt.Errorf("error setting environment variable '%s': %v", envVar, err)
-		}
-	}
-
 	for _, ms := range spec.Mounts {
 		// ignore cgroup mount, lxc automouts this even with lxc.rootfs.managed = 0
 		// conf.c:mount_entry:1854 - Device or resource busy - Failed to mount "cgroup" on "/usr/lib/x86_64-linux-gnu/lxc/rootfs/sys/fs/cgroup"
@@ -575,9 +570,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set syncfifo mount config entry")
 	}
 
-	err := emitFifoWaiter(path.Join(spec.Root.Path, "fifo-wait"))
-	if err != nil {
-		return errors.Wrapf(err, "couldn't write wrapper init")
+	if err := setInitCmd(c, spec); err != nil {
+		return errors.Wrap(err, "failed to set lxc.init.cmd")
 	}
 
 	if err := ensureShell(spec.Root.Path); err != nil {
@@ -590,14 +584,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	if err := c.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
 		return errors.Wrap(err, "failed to set hostname")
-	}
-
-	if cmd, err := emitCmdFile(spec); err != nil {
-		return errors.Wrapf(err, "could not write command file")
-	} else {
-		if err := c.SetConfigItem("lxc.execute.cmd", "/fifo-wait "+cmd); err != nil {
-			return errors.Wrap(err, "failed to set lxc.execute.cmd")
-		}
 	}
 
 	if err := c.SetConfigItem("lxc.hook.version", "1"); err != nil {
