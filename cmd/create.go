@@ -201,8 +201,6 @@ func doCreate(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	log.Infof("created syncfifo, executing %#v", spec.Process.Args)
-
 	if err := startContainer(c, spec); err != nil {
 		return errors.Wrap(err, "failed to start the container init")
 	}
@@ -595,6 +593,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := c.SaveConfigFile(savedConfigFile); err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", savedConfigFile)
 	}
+
+	// copy config file for debugging purposes
+	exec.Command("cp", savedConfigFile, "/tmp/config."+c.Name()).Run()
 
 	return nil
 }
