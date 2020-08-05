@@ -1,0 +1,15 @@
+{
+  "metadata": {
+      "name": "busyboxXXX"
+  },
+  "image":{
+      "image": "busybox"
+  },
+  "command": [
+			"sh", "-c",
+      "uptime && sleep 600"
+  ],
+  "log_path":"busybox.log",
+  "linux": {
+  }
+}
