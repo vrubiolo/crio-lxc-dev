@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"golang.org/x/sys/unix"
+	"time"
 
 	"io/ioutil"
 	"os"
@@ -37,7 +38,12 @@ var createCmd = cli.Command{
 		},
 		cli.StringFlag{
 			Name:  "pid-file",
-			Usage: "path to write container PID", // TODO not handled yet
+			Usage: "path to write container PID",
+		},
+		cli.DurationFlag{
+			Name:  "timeout",
+			Usage: "timeout for container creation",
+			Value: time.Second*30,
 		},
 	},
 }
@@ -218,7 +224,7 @@ func doCreate(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	cmd, err := startContainer(c, spec)
+	cmd, err := startContainer(c, spec, ctx.Duration("timeout"))
 	if err != nil {
 		return errors.Wrap(err, "failed to start the container")
 	}
@@ -626,7 +632,7 @@ func makeSyncFifo(dir string) error {
 	return nil
 }
 
-func startContainer(c *lxc.Container, spec *specs.Spec) (*exec.Cmd, error) {
+func startContainer(c *lxc.Container, spec *specs.Spec, timeout time.Duration) (*exec.Cmd, error) {
 	binary, err := os.Readlink("/proc/self/exe")
 	if err != nil {
 		return nil, err
@@ -646,5 +652,20 @@ func startContainer(c *lxc.Container, spec *specs.Spec) (*exec.Cmd, error) {
 		cmd.Stderr = os.Stderr
 	}
 
-	return cmd, cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return cmd, err
+	}
+
+	// wait until lxc.init.cmd is executed
+	pollingStart := time.Now()
+	for {
+		if c.InitPid() > 1 {
+			return cmd, nil
+		}
+		if time.Since(pollingStart) > timeout {
+			break
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+	return cmd, fmt.Errorf("failed to retrieve the PID for lxc.init.cmd within %s", timeout)
 }
