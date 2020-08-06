@@ -138,7 +138,7 @@ func resolveMountDestination(rootfs string, dst string) (string, error) {
 	return dstPath, nil
 }
 
-// atomic file path creation
+// createPidFile atomically creates a pid file for the given pid at the given path
 func createPidFile(path string, pid int) error {
 	tmpDir := filepath.Dir(path)
 	tmpName := filepath.Join(tmpDir, fmt.Sprintf(".%s", filepath.Base(path)))
@@ -156,4 +156,15 @@ func createPidFile(path string, pid int) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+// checkRuntime checks runtime requirements
+// An error is returned if any runtime requirement is not met.
+func checkRuntime() error {
+	// TODO check in build script
+	// minimal lxc version is 3.1 https://discuss.linuxcontainers.org/t/lxc-3-1-has-been-released/3527
+	if ! lxc.VersionAtLeast(3, 1, 0) {
+		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
+	}
+	return nil
 }

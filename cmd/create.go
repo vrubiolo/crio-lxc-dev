@@ -34,7 +34,7 @@ var createCmd = cli.Command{
 		},
 		cli.IntFlag{
 			Name:  "console-socket",
-			Usage: "pty master FD", // TODO not handled yet
+			Usage: "pty master FD (not handled yet)", // TODO
 		},
 		cli.StringFlag{
 			Name:  "pid-file",
@@ -191,6 +191,11 @@ func doCreate(ctx *cli.Context) error {
 		fmt.Fprintf(os.Stderr, "missing container ID\n")
 		cli.ShowCommandHelpAndExit(ctx, "create", 1)
 	}
+
+	if err := checkRuntime(); err != nil {
+		return errors.Wrap(err, "runtime requiements check failed")
+	}
+
 	log.Infof("creating container %s", containerID)
 
 	exists, err := containerExists(containerID)
@@ -498,6 +503,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := c.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
 		return errors.Wrapf(err, "failed to set rootfs: '%s'", spec.Root.Path)
 	}
+
 	if err := c.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
 	}
