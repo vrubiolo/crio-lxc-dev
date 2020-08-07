@@ -80,6 +80,7 @@ func main() {
 				stdlog.SetOutput(logFile)
 			}
 		}
+		log.Debugf("LXC_PATH: %s", LXC_PATH)
 		return nil
 	}
 

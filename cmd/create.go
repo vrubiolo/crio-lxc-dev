@@ -43,10 +43,10 @@ var createCmd = cli.Command{
 		cli.DurationFlag{
 			Name:  "timeout",
 			Usage: "timeout for container creation",
-			Value: time.Second*30,
+			Value: time.Second * 5,
 		},
 		cli.StringFlag{
-			Name: "busybox-static",
+			Name:  "busybox-static",
 			Usage: "path to statically-linked busybox binary",
 			Value: "/bin/busybox",
 		},
@@ -75,21 +75,19 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 		return errors.Wrapf(err, "Failed doing mkdir")
 	}
 
-	err = RunCommand("cp", ctx.String("busybox-static"), filepath.Join(rootfs, "bin/"))
+	busyboxSrc := ctx.String("busybox-static")
+	busyboxDst := filepath.Join(rootfs, "bin/busybox")
+	busyboxLinks := []string{"bin/sh"}
+
+	err = RunCommand("cp", busyboxSrc, busyboxDst)
 	if err != nil {
-		return errors.Wrapf(err, "Failed copying busybox")
+		return errors.Wrapf(err, "Failed copying busybox %s", busyboxSrc)
 	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/stat"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking stat")
-	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/sh"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking sh")
-	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/tee"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking tee")
+	for _, cmd := range busyboxLinks {
+		err = RunCommand("ln", busyboxDst, filepath.Join(rootfs, cmd))
+		if err != nil {
+			return errors.Wrapf(err, "Failed linking %s", cmd)
+		}
 	}
 	return nil
 }
@@ -105,10 +103,17 @@ const (
 // Every command argument is quoted and shell specials are escaped
 // for `exec` to process them properly.
 func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
+
+	if err := c.SetConfigItem("lxc.environment", envStateCreated); err != nil {
+		return err
+	}
+
 	buf := strings.Builder{}
 	buf.WriteString("#!/bin/sh\n")
+	// wait for start command
 	fmt.Fprintf(&buf, "echo %q > %s\n", SYNC_FIFO_CONTENT, SYNC_FIFO_PATH)
 
+	// export environment variables
 	for _, envVar := range spec.Process.Env {
 		keyVal := strings.SplitN(envVar, "=", 2)
 		if len(keyVal) != 2 {
@@ -116,6 +121,12 @@ func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 		}
 		fmt.Fprintf(&buf, "export %s=\"%s\"\n", keyVal[0], keyVal[1])
 	}
+
+	// after exec /proc/{pid}/environ reflects the new state
+	fmt.Fprintf(&buf, "export %s\n", envStateRunning)
+
+	// change to working directory before running exec
+	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
 
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
@@ -141,7 +152,8 @@ func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 	}
 
 	cmdFile := path.Join(spec.Root.Path, EXECUTE_CMD)
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0750)
+	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
+	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0777)
 	if err != nil {
 		return err
 	}
@@ -235,22 +247,7 @@ func doCreate(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	cmd, err := startContainer(c, spec, ctx.Duration("timeout"))
-	if err != nil {
-		return errors.Wrap(err, "failed to start the container")
-	}
-
-	// conmon always passes a PID on create ?
-	pidfile := ctx.String("pid-file")
-	if pidfile != "" {
-		// conmon requires the PID from the crio-lxc wrapper
-		err := createPidFile(pidfile, cmd.Process.Pid)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create pid file %s", pidfile)
-		}
-	}
-	log.Infof("created container %s in lxcdir %s", containerID, LXC_PATH)
-	return nil
+	return startContainer(ctx, c, spec, ctx.Duration("timeout"))
 }
 
 func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -260,6 +257,9 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	if aaprofile == "" {
 		aaprofile = "unconfined"
 	}
+	// IMPORTANT must disable lxc-start apparmor profile else container startup fails
+	// 	ln -s /etc/apparmor.d/usr.bin.lxc-start /etc/apparmor.d/disable/
+	//		apparmor_parser -R /etc/apparmor.d/usr.bin.lxc-start
 	if err := c.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
 		return errors.Wrapf(err, "failed to set apparmor.profile to %s", aaprofile)
 	}
@@ -514,6 +514,10 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
 	}
 
+	if err := c.SetConfigItem("lxc.rootfs.options", ""); err != nil {
+		return errors.Wrap(err, "failed to set lxc.rootfs.options")
+	}
+
 	for _, ms := range spec.Mounts {
 		// ignore cgroup mount, lxc automouts this even with lxc.rootfs.managed = 0
 		// conf.c:mount_entry:1854 - Device or resource busy - Failed to mount "cgroup" on "/usr/lib/x86_64-linux-gnu/lxc/rootfs/sys/fs/cgroup"
@@ -597,10 +601,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
 
-	if err := c.SetConfigItem("lxc.init.cwd", spec.Process.Cwd); err != nil {
-		return errors.Wrap(err, "failed to set CWD")
-	}
-
 	if err := c.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
 		return errors.Wrap(err, "failed to set hostname")
 	}
@@ -638,46 +638,43 @@ func makeSyncFifo(dir string) error {
 	fifoFilename := filepath.Join(dir, "syncfifo")
 	prevMask := unix.Umask(0000)
 	defer unix.Umask(prevMask)
-	if err := unix.Mkfifo(fifoFilename, 0622); err != nil {
+	if err := unix.Mkfifo(fifoFilename, 0666); err != nil {
 		return errors.Wrapf(err, "failed to make fifo '%s'", fifoFilename)
 	}
 	return nil
 }
 
-func startContainer(c *lxc.Container, spec *specs.Spec, timeout time.Duration) (*exec.Cmd, error) {
-	binary, err := os.Readlink("/proc/self/exe")
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.Command(
-		binary,
-		"internal",
-		c.Name(),
-		LXC_PATH,
-		filepath.Join(LXC_PATH, c.Name(), "config"),
+func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
+	cmd := exec.Command("/usr/bin/lxc-start",
+		"-n", c.Name(),
+		"-p", ctx.String("pid-file"),
+		"-d",
+		"-f", filepath.Join(LXC_PATH, c.Name(), "config"),
+		"-P", LXC_PATH,
 	)
 
-	if !spec.Process.Terminal {
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+	log.Debugf("Running cmd: %s", cmd.Args)
+
+	err := cmd.Start()
+	if err != nil {
+		return err
 	}
 
-	if err := cmd.Start(); err != nil {
-		return cmd, err
+	if !waitContainerCreated(c, timeout) {
+		return fmt.Errorf("container creation timeout (%s) expired", timeout)
 	}
+	return nil
+}
 
-	// wait until lxc.init.cmd is executed
-	pollingStart := time.Now()
-	for {
-		if c.InitPid() > 1 {
-			return cmd, nil
-		}
-		if time.Since(pollingStart) > timeout {
-			break
+func waitContainerCreated(c *lxc.Container, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pid, state := getContainerInitState(c)
+		log.Debugf("State %d %s", pid, state)
+		if pid > 0 && state == stateCreated {
+			return true
 		}
 		time.Sleep(time.Millisecond * 50)
 	}
-	return cmd, fmt.Errorf("failed to retrieve the PID for lxc.init.cmd within %s", timeout)
+	return false
 }

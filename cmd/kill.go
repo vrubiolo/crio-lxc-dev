@@ -93,11 +93,12 @@ func doKill(ctx *cli.Context) error {
 
 	}
 
-	if c.Running() { //&& checkHackyPreStart(c) == "started" {
+	if c.Running() {
 		pid := c.InitPid()
 
-		if err := unix.Kill(pid, signalMap[ctx.String("signal")]); err != nil {
-			return errors.Wrap(err, "failed to send signal")
+		sig := ctx.String("signal")
+		if err := unix.Kill(pid, signalMap[sig]); err != nil {
+			return errors.Wrapf(err, "failed to send signal %s", sig)
 		}
 		return nil
 	}
