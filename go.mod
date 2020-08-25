@@ -9,6 +9,8 @@ require (
 	github.com/pkg/errors v0.8.1
 	github.com/segmentio/ksuid v1.0.3
 	github.com/stretchr/objx v0.2.0 // indirect
+	github.com/stretchr/testify v1.3.0
+	github.com/u-root/u-root v6.0.0+incompatible
 	github.com/urfave/cli v1.20.0
 	golang.org/x/crypto v0.0.0-20190621222207-cc06ce4a13d4 // indirect
 	golang.org/x/sys v0.0.0-20190624142023-c5567b49c5d0
