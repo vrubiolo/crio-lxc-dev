@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 
+	ldd "github.com/u-root/u-root/pkg/ldd"
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
 
@@ -160,11 +161,27 @@ func createPidFile(path string, pid int) error {
 
 // checkRuntime checks runtime requirements
 // An error is returned if any runtime requirement is not met.
-func checkRuntime() error {
+func checkRuntime(ctx *cli.Context) error {
 	// TODO check in build script
 	// minimal lxc version is 3.1 https://discuss.linuxcontainers.org/t/lxc-3-1-has-been-released/3527
 	if ! lxc.VersionAtLeast(3, 1, 0) {
 		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
 	}
+	if err := isStaticBinary(ctx.String("busybox-static")); err != nil {
+		return err
+	}
 	return nil
 }
+
+func isStaticBinary(binPath string) error {
+	libs, err := ldd.Ldd([]string{binPath})
+	if err != nil {
+		return err
+	}
+
+	if len(libs) == 1 {
+		return nil
+	}
+	return fmt.Errorf("%s is not a static binary", binPath)
+}
+

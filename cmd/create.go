@@ -45,6 +45,11 @@ var createCmd = cli.Command{
 			Usage: "timeout for container creation",
 			Value: time.Second*30,
 		},
+		cli.StringFlag{
+			Name: "busybox-static",
+			Usage: "path to statically-linked busybox binary",
+			Value: "/bin/busybox",
+		},
 	},
 }
 
@@ -59,7 +64,7 @@ var NamespaceMap = map[string]string{
 	"uts":     "uts",
 }
 
-func ensureShell(rootfs string) error {
+func ensureShell(ctx *cli.Context, rootfs string) error {
 	shPath := filepath.Join(rootfs, "bin/sh")
 	if exists, _ := pathExists(shPath); exists {
 		return nil
@@ -69,7 +74,8 @@ func ensureShell(rootfs string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed doing mkdir")
 	}
-	err = RunCommand("cp", "/bin/busybox", filepath.Join(rootfs, "bin/"))
+
+	err = RunCommand("cp", ctx.String("busybox-static"), filepath.Join(rootfs, "bin/"))
 	if err != nil {
 		return errors.Wrapf(err, "Failed copying busybox")
 	}
@@ -192,7 +198,7 @@ func doCreate(ctx *cli.Context) error {
 		cli.ShowCommandHelpAndExit(ctx, "create", 1)
 	}
 
-	if err := checkRuntime(); err != nil {
+	if err := checkRuntime(ctx); err != nil {
 		return errors.Wrap(err, "runtime requiements check failed")
 	}
 
@@ -587,7 +593,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set lxc.init.cmd")
 	}
 
-	if err := ensureShell(spec.Root.Path); err != nil {
+	if err := ensureShell(ctx, spec.Root.Path); err != nil {
 		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
 
