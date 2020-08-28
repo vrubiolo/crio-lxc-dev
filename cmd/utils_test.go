@@ -72,3 +72,8 @@ func TestIsStaticBinary(t *testing.T) {
 	require.NoError(t, isStaticBinary("/bin/zcat"))
 	require.Error(t, isStaticBinary("/usr/bin/systemd"))
 }
+
+func TestCapabilities(t *testing.T) {
+	require.NoError(t, runtimeHasCapabilitySupport("/usr/local/bin/startcontainer"))
+	require.Error(t, runtimeHasCapabilitySupport("/bin/zcat"))
+}

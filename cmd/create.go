@@ -282,23 +282,8 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		return errors.Wrapf(err, "failed to set lxc.ephemeral=0")
 	}
 
-	// Set the capabilities to keep / drop.
-	// See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
-	// https://blog.container-solutions.com/linux-capabilities-in-practice
-	// https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work
-
-	keepCaps := "none"
-	if spec.Process.Capabilities != nil {
-		var caps []string
-		for _, c := range spec.Process.Capabilities.Permitted {
-			lcCapName := strings.TrimPrefix(strings.ToLower(c), "cap_")
-			caps = append(caps, lcCapName)
-		}
-		keepCaps = strings.Join(caps, " ")
-	}
-
-	if err := c.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
-		return errors.Wrapf(err, "failed to set lxc.cap.keep")
+	if err := configureCapabilities(ctx, c, spec); err != nil {
+		return errors.Wrapf(err, "failed to configure capabilities")
 	}
 
 	if err := c.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
@@ -322,6 +307,30 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	}
 
 	return configureCgroupResources(ctx, c, spec)
+}
+
+// configureCapabilities configures the linux capabilities / privileges granted to the container processes.
+// NOTE Capabilities support must be enabled explicitly when compiling liblxc. ( --enable-capabilities)
+// The container will not start if spec.Process.Capabilities is defined and liblxc has no capablities support.
+// See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
+// https://blog.container-solutions.com/linux-capabilities-in-practice
+// https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work
+func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	keepCaps := "none"
+	if spec.Process.Capabilities != nil {
+		var caps []string
+		for _, c := range spec.Process.Capabilities.Permitted {
+			lcCapName := strings.TrimPrefix(strings.ToLower(c), "cap_")
+			caps = append(caps, lcCapName)
+		}
+		keepCaps = strings.Join(caps, " ")
+	}
+
+	log.Debugf("Keeping capabilities: %s", keepCaps)
+	if err := c.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
+		return errors.Wrapf(err, "failed to set lxc.cap.keep")
+	}
+	return nil
 }
 
 func ensureDevNull(linux *specs.Linux) {

@@ -164,7 +164,7 @@ func createPidFile(path string, pid int) error {
 func checkRuntime(ctx *cli.Context) error {
 	// TODO check in build script
 	// minimal lxc version is 3.1 https://discuss.linuxcontainers.org/t/lxc-3-1-has-been-released/3527
-	if ! lxc.VersionAtLeast(3, 1, 0) {
+	if !lxc.VersionAtLeast(3, 1, 0) {
 		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
 	}
 	if err := isStaticBinary(ctx.String("busybox-static")); err != nil {
@@ -185,3 +185,20 @@ func isStaticBinary(binPath string) error {
 	return fmt.Errorf("%s is not a static binary", binPath)
 }
 
+// runtimeHasCapabilitySupport checks whether he given runtime binary is linked against libcap.so.
+// TODO liblxc should output a better error message e.g:
+// "Can not set lxc.cap.keep or lxc.cap.drop because capabilies are disabled. Please compile with --enable-capabilities"
+func runtimeHasCapabilitySupport(runtime string) error {
+	// assume runtime is dynamically linked
+	// ldd resolves libraries recursively
+	libs, err := ldd.Ldd([]string{runtime})
+	if err != nil {
+		return err
+	}
+	for _, lib := range libs {
+		if strings.HasPrefix(filepath.Base(lib.FullName), "libcap.") {
+			return nil
+		}
+	}
+	return fmt.Errorf("liblxc is not linked against libcap.so")
+}
