@@ -102,12 +102,15 @@ func doState(ctx *cli.Context) error {
 }
 
 func getContainerInitState(c *lxc.Container) (int, string) {
-	pid := c.InitPid()
-	if pid <= 0 {
-		log.Debugf("failed to get init pid for container %s", c.Name())
+	pid, proc, err := safeGetInitPid(c)
+	if err != nil {
 		return -1, stateStopped
 	}
+	if proc != nil {
+		defer proc.Close()
+	}
 
+	// will fail if procfs is not mounted 
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
