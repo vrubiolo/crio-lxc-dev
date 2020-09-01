@@ -108,10 +108,17 @@ const (
 // Every command argument is quoted and shell specials are escaped
 // for `exec` to process them properly.
 func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
+
+	if err := c.SetConfigItem("lxc.environment", envStateCreated); err != nil {
+		return err
+	}
+
 	buf := strings.Builder{}
 	buf.WriteString("#!/bin/sh\n")
+	// wait for start command
 	fmt.Fprintf(&buf, "echo %q > %s\n", SYNC_FIFO_CONTENT, SYNC_FIFO_PATH)
 
+	// export environment variables
 	for _, envVar := range spec.Process.Env {
 		keyVal := strings.SplitN(envVar, "=", 2)
 		if len(keyVal) != 2 {
@@ -119,6 +126,12 @@ func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 		}
 		fmt.Fprintf(&buf, "export %s=\"%s\"\n", keyVal[0], keyVal[1])
 	}
+
+	// after exec /proc/{pid}/environ reflects the new state
+	fmt.Fprintf(&buf, "export %s\n", envStateRunning)
+
+	// change to working directory before running exec
+	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
 
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
@@ -586,16 +599,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set syncfifo mount config entry")
 	}
 
-	if err := setInitCmd(c, spec); err != nil {
-		return errors.Wrap(err, "failed to set lxc.init.cmd")
-	}
-
 	if err := ensureShell(ctx, spec.Root.Path); err != nil {
 		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
 
-	if err := c.SetConfigItem("lxc.init.cwd", spec.Process.Cwd); err != nil {
-		return errors.Wrap(err, "failed to set CWD")
+	if err := setInitCmd(c, spec); err != nil {
+		return errors.Wrap(err, "failed to set lxc.init.cmd")
 	}
 
 	if err := c.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
