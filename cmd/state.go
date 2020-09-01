@@ -6,10 +6,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
-	// "github.com/apex/log"
+	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -28,6 +27,26 @@ var stateCmd = cli.Command{
 	Flags: []cli.Flag{},
 }
 
+// runtime states https://github.com/opencontainers/runtime-spec/blob/v1.0.2/runtime.md
+const (
+	// the container is being created (step 2 in the lifecycle)
+	stateCreating = "creating"
+	// the runtime has finished the create operation (after step 2 in the lifecycle),
+	// and the container process has neither exited nor executed the user-specified program
+	stateCreated = "created"
+	// the container process has executed the user-specified program
+	// but has not exited (after step 5 in the lifecycle)
+	stateRunning = "running"
+	// the container process has exited (step 7 in the lifecycle)
+	stateStopped = "stopped"
+
+	// environment variables for the LXC init process to
+	// distinguish between created and running state
+	envState        = "CRIO_LXC_STATE"
+	envStateCreated = envState + "=" + stateCreated
+	envStateRunning = envState + "=" + stateRunning
+)
+
 func doState(ctx *cli.Context) error {
 	containerID := ctx.Args().Get(0)
 	if len(containerID) == 0 {
@@ -45,53 +64,14 @@ func doState(ctx *cli.Context) error {
 
 	c, err := lxc.NewContainer(containerID, LXC_PATH)
 	if err != nil {
-		return errors.Wrap(err, "failed to load container")
+		return errors.Wrapf(err, "failed to load container %s", containerID)
 	}
 	defer c.Release()
 
 	if err := configureLogging(ctx, c); err != nil {
 		return errors.Wrap(err, "failed to configure logging")
-
 	}
 
-	status := "stopped"
-	pid := 0
-	if c.Running() {
-		if checkHackyPreStart(c) == "started" {
-			status = "running"
-		}
-		pid = c.InitPid()
-
-		// need to detect 'created' per
-		// https://github.com/opencontainers/runtime-spec/blob/v1.0.0-rc4/runtime.md#state
-		// it means "the container process has neither exited nor executed the user-specified program"
-
-		// if cmd name of the child of the init pid starts with "/bin/sh /fifo-wait" then we can say it's 'created'
-
-		procChildrenFilename := fmt.Sprintf("/proc/%d/task/%d/children", pid, pid)
-		childrenStr, err := ioutil.ReadFile(procChildrenFilename)
-		if err != nil {
-			return errors.Wrapf(err, "failed to read children from %s", procChildrenFilename)
-		}
-		children := strings.Split(strings.TrimSpace(string(childrenStr)), " ")
-
-		if len(children) == 1 {
-			childPid, err := strconv.Atoi(children[0])
-			if err != nil {
-				return errors.Wrapf(err, "failed to convert child pid")
-			}
-			procCmdlineFilename := fmt.Sprintf("/proc/%d/cmdline", childPid)
-			cmdline, err := ioutil.ReadFile(procCmdlineFilename)
-			if err != nil {
-				return errors.Wrapf(err, "failed to read cmdline from %s", procCmdlineFilename)
-			}
-
-			cmdArgv := strings.Split(string(cmdline), "\x00")
-			if len(cmdArgv) > 2 && cmdArgv[0] == "/bin/sh" && cmdArgv[1] == EXECUTE_CMD {
-				status = "created"
-			}
-		}
-	}
 	// bundlePath is the enclosing directory of the rootfs:
 	// https://github.com/opencontainers/runtime-spec/blob/v1.0.0-rc4/bundle.md
 	bundlePath := filepath.Dir(c.ConfigItem("lxc.rootfs.path")[0])
@@ -99,10 +79,18 @@ func doState(ctx *cli.Context) error {
 	s := specs.State{
 		Version:     CURRENT_OCI_VERSION,
 		ID:          containerID,
-		Status:      status,
-		Pid:         pid,
+		Pid:         -1,
 		Bundle:      bundlePath,
 		Annotations: annotations,
+	}
+
+	switch c.State() {
+	case lxc.STARTING:
+		s.Status = stateCreating
+	case lxc.RUNNING, lxc.FROZEN, lxc.THAWED, lxc.STOPPING, lxc.ABORTING, lxc.FREEZING:
+		s.Pid, s.Status = getContainerInitState(c)
+	case lxc.STOPPED:
+		s.Status = stateStopped
 	}
 
 	stateJson, err := json.Marshal(s)
@@ -110,6 +98,31 @@ func doState(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to marshal json")
 	}
 	fmt.Fprint(os.Stdout, string(stateJson))
-
 	return nil
+}
+
+func getContainerInitState(c *lxc.Container) (int, string) {
+	pid := c.InitPid()
+	if pid <= 0 {
+		log.Debugf("failed to get init pid for container %s", c.Name())
+		return -1, stateStopped
+	}
+
+	envFile := fmt.Sprintf("/proc/%d/environ", pid)
+	data, err := ioutil.ReadFile(envFile)
+	if err != nil {
+		log.Debugf("failed to read %s: %s", envFile, err)
+		return -1, stateStopped
+	}
+
+	environ := strings.Split(string(data), "\000")
+	for _, env := range environ {
+		if env == envStateCreated {
+			return pid, stateCreated
+		}
+		if env == envStateRunning {
+			return pid, stateRunning
+		}
+	}
+	return pid, stateStopped
 }
