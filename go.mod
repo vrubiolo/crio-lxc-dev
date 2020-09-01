@@ -13,11 +13,11 @@ require (
 	github.com/u-root/u-root v6.0.0+incompatible
 	github.com/urfave/cli v1.20.0
 	golang.org/x/crypto v0.0.0-20190621222207-cc06ce4a13d4 // indirect
-	golang.org/x/sys v0.0.0-20190624142023-c5567b49c5d0
+	golang.org/x/sys v0.0.0-20200828150025-8dfe04af21d5
 	golang.org/x/text v0.3.2 // indirect
 	golang.org/x/tools v0.0.0-20190625160430-252024b82959 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
-	gopkg.in/lxc/go-lxc.v2 v2.0.0-20190625173123-f4822c6bba64
+	gopkg.in/lxc/go-lxc.v2 v2.0.0-20200826211823-2dd0dc9c018b
 	gopkg.in/yaml.v2 v2.2.2 // indirect
 )
 

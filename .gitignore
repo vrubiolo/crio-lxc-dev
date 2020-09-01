@@ -5,3 +5,5 @@ oci/
 roots/
 .stacker/
 .keeptempdirs
+tools/crio-lxc-start
+tools/crio-lxc-kill
