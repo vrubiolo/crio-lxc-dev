@@ -77,3 +77,18 @@ func TestCapabilities(t *testing.T) {
 	require.NoError(t, runtimeHasCapabilitySupport("/usr/local/bin/startcontainer"))
 	require.Error(t, runtimeHasCapabilitySupport("/bin/zcat"))
 }
+
+func TestKernelRelease(t *testing.T) {
+	release := "5.8.0-trunk-amd64"
+	r, err := ParseUtsnameRelease(release)
+	require.NoError(t, err)
+	require.Equal(t, "trunk-amd64", r.Suffix)
+	require.True(t, r.GreaterEqual(5, 8, 0))
+	require.True(t, r.GreaterEqual(4, 9, 0))
+	require.False(t, r.GreaterEqual(5, 8, 1))
+
+	release = "5.9.3"
+	r, err = ParseUtsnameRelease(release)
+	require.NoError(t, err)
+	require.Empty(t, r.Suffix)
+}
