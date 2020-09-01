@@ -157,7 +157,8 @@ func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 	}
 
 	cmdFile := path.Join(spec.Root.Path, EXECUTE_CMD)
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0750)
+	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
+	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0555)
 	if err != nil {
 		return err
 	}
@@ -359,9 +360,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	c.SetConfigItem("lxc.cgroup.relative", "1")
 
-	// disable automatic device population
 	// autodev is required
-	c.SetConfigItem("lxc.autodev", "1")
+	c.SetConfigItem("lxc.autodev", "1") // TODO  create /dev/null ?
 	// if autodev is disable lxc spits out these warnings:
 	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
 	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
@@ -475,6 +475,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	return nil
 }
 
+// The hook is run within the host namespace, after all rootfs setup is completed.
 func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	hookPath := filepath.Join(spec.Root.Path, "hook_create_devices.sh")
 	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
@@ -503,7 +504,6 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 		fmt.Fprintf(f, "mknod -m %#o %s %s %d %d\n", mode, devPath, dev.Type, dev.Major, dev.Minor)
 		fmt.Fprintf(f, "chown %d:%d %s\n", uid, gid, devPath)
 	}
-	// The script is run within the host namespace, after all rootfs setup is completed.
 	return c.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
@@ -522,6 +522,10 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	if err := c.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
+	}
+
+	if err := c.SetConfigItem("lxc.rootfs.options", ""); err != nil {
+		return errors.Wrap(err, "failed to set lxc.rootfs.options")
 	}
 
 	for _, ms := range spec.Mounts {
@@ -643,7 +647,7 @@ func makeSyncFifo(dir string) error {
 	fifoFilename := filepath.Join(dir, "syncfifo")
 	prevMask := unix.Umask(0000)
 	defer unix.Umask(prevMask)
-	if err := unix.Mkfifo(fifoFilename, 0622); err != nil {
+	if err := unix.Mkfifo(fifoFilename, 0666); err != nil {
 		return errors.Wrapf(err, "failed to make fifo '%s'", fifoFilename)
 	}
 	return nil
