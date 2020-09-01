@@ -86,10 +86,10 @@ func PidfdSendSignal(pidfd uintptr, signum unix.Signal) error {
 	return nil
 }
 
-func killContainer(c *lxc.Container, signum unix.Signal) error {
+func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	pid := c.InitPid()
 	if pid < 0 {
-		return fmt.Errorf("expected init pid > 0, but was %d", pid)
+		return -1, nil, fmt.Errorf("expected init pid > 0, but was %d", pid)
 	}
 	// Open the proc directory of the init process to avoid that
 	// it's PID is recycled before it receives the signal.
@@ -98,14 +98,24 @@ func killContainer(c *lxc.Container, signum unix.Signal) error {
 		// This may fail if either the proc filesystem is not mounted, or
 		// the process has died
 		log.Warnf("failed to open /proc/%d : %s", err)
-	} else {
-		defer proc.Close()
 	}
 	// double check that the init process still exists, and the proc
 	// directory actually belongs to the init process.
 	pid2 := c.InitPid()
 	if pid2 != pid {
-		return errors.Wrapf(err, "init process %d has already died", pid)
+		proc.Close()
+		return -1, nil, errors.Wrapf(err, "init process %d has already died", pid)
+	}
+	return pid, proc, nil
+}
+
+func killContainer(c *lxc.Container, signum unix.Signal) error {
+	pid, proc, err := safeGetInitPid(c)
+	if err != nil {
+		return err
+	}
+	if proc != nil {
+		defer proc.Close()
 	}
 	log.Debugf("kill pid:%d signum:%d(%s)", pid, signum, signum)
 	if err := unix.Kill(pid, signum); err != nil {
