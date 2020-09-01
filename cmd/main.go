@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	stdlog "log"
 	"os"
 
@@ -79,17 +78,15 @@ func main() {
 				logFile = f
 				stdlog.SetOutput(logFile)
 			}
+		} else {
+			stdlog.SetOutput(os.Stderr)
 		}
+		log.Debugf("cmdline: %s", os.Args)
 		return nil
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		format := "error: %v\n"
-		if debug {
-			format = "error: %+v\n"
-		}
-		log.Errorf("Cmdline: %s\nerror: %+v\n", os.Args, err)
-		fmt.Fprintf(os.Stderr, format, err)
+		log.Errorf("%+v", err)
 		os.Exit(1)
 	}
 }
