@@ -46,7 +46,7 @@ var createCmd = cli.Command{
 			Value: time.Second * 5,
 		},
 		cli.StringFlag{
-			Name: "busybox-static",
+			Name:  "busybox-static",
 			Usage: "path to statically-linked busybox binary",
 			Value: "/bin/busybox",
 		},
@@ -75,21 +75,19 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 		return errors.Wrapf(err, "Failed doing mkdir")
 	}
 
-	err = RunCommand("cp", ctx.String("busybox-static"), filepath.Join(rootfs, "bin/"))
+	busyboxSrc := ctx.String("busybox-static")
+	busyboxDst := filepath.Join(rootfs, "bin/busybox")
+	busyboxLinks := []string{"bin/sh"}
+
+	err = RunCommand("cp", busyboxSrc, busyboxDst)
 	if err != nil {
-		return errors.Wrapf(err, "Failed copying busybox")
+		return errors.Wrapf(err, "Failed copying busybox %s", busyboxSrc)
 	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/stat"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking stat")
-	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/sh"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking sh")
-	}
-	err = RunCommand("ln", filepath.Join(rootfs, "bin/busybox"), filepath.Join(rootfs, "bin/tee"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed linking tee")
+	for _, cmd := range busyboxLinks {
+		err = RunCommand("ln", busyboxDst, filepath.Join(rootfs, cmd))
+		if err != nil {
+			return errors.Wrapf(err, "Failed linking %s", cmd)
+		}
 	}
 	return nil
 }
