@@ -631,11 +631,15 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	// 	passFdsToContainer()
 	// }
 
+	return nil
+}
+
+func saveConfig(c *lxc.Container, configFilePath string) error {
+	log.Debugf("Saving config file %s", configFilePath)
 	// Write out final config file for debugging and use with lxc-attach:
 	// Do not edit config after this.
-	savedConfigFile := filepath.Join(LXC_PATH, c.Name(), "config")
-	if err := c.SaveConfigFile(savedConfigFile); err != nil {
-		return errors.Wrapf(err, "failed to save config file to '%s'", savedConfigFile)
+	if err := c.SaveConfigFile(configFilePath); err != nil {
+		return errors.Wrapf(err, "failed to save config file to '%s'", configFilePath)
 	}
 	return nil
 
@@ -659,13 +663,19 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 	cmd := exec.Command(runtime, c.Name(), LXC_PATH, configFilePath)
 
 	if !spec.Process.Terminal {
+		// Inherit stdio from calling process (conmon)
+		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
+		// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
+		if err := c.SetConfigItem("lxc.console.path", "none"); err != nil {
+			return errors.Wrapf(err, "failed to disable PTY")
+		}
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
 
-	if err := cmd.Start(); err != nil {
-		return cmd, err
+	if err := saveConfig(c, configFilePath); err != nil {
+		return err
 	}
 
 	log.Debugf("Starting runtime: %s", cmd.Args)
