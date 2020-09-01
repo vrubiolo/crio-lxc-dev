@@ -40,7 +40,8 @@ func doDelete(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to check if container exists")
 	}
 	if !exists {
-		return fmt.Errorf("container '%s' not found", containerID)
+		log.Warnf("container '%s' not found", containerID)
+		return nil
 	}
 
 	c, err := lxc.NewContainer(containerID, LXC_PATH)
@@ -51,19 +52,17 @@ func doDelete(ctx *cli.Context) error {
 
 	if err := configureLogging(ctx, c); err != nil {
 		return errors.Wrap(err, "failed to configure logging")
-
 	}
 
-	force := ctx.Bool("force")
-	if c.Running() {
-		if checkHackyPreStart(c) == "started" && !force {
-			return fmt.Errorf("container '%s' is running, cannot delete.", containerID)
+	state := c.State()
+	if state != lxc.STOPPED {
+		if !ctx.Bool("force") {
+			return fmt.Errorf("container %s must be stopped before delete - current state is %s", containerID, state)
 		}
 		if err := c.Stop(); err != nil {
-			log.Warnf("Failed to stop pre-started container %s: %v", containerID, err)
+			log.Warnf("failed to stop container %s: %v", containerID, err)
 		}
 	}
-
 	// TODO: lxc-destroy deletes the rootfs.
 	// this appears to contradict the runtime spec:
 
