@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -201,4 +203,49 @@ func runtimeHasCapabilitySupport(runtime string) error {
 		}
 	}
 	return fmt.Errorf("liblxc is not linked against libcap.so")
+}
+
+type Release struct {
+	Major      int
+	Minor      int
+	Patchlevel int
+	Suffix     string
+}
+
+func (r Release) GreaterEqual(major, minor, patchlevel int) bool {
+	if r.Major < major {
+		return false
+	}
+	if r.Major > major {
+		return true
+	}
+	if r.Minor < minor {
+		return false
+	}
+	if r.Minor > minor {
+		return true
+	}
+	return r.Patchlevel >= patchlevel
+}
+
+func ParseUtsnameRelease(releaseData string) (*Release, error) {
+	var r Release
+	numParsed, err := fmt.Sscanf(releaseData, "%d.%d.%d-%s", &r.Major, &r.Minor, &r.Patchlevel, &r.Suffix)
+	if err != nil {
+		if numParsed == 3 {
+			return &r, nil
+		}
+		return nil, fmt.Errorf("Invalid format %q: %s", releaseData, err)
+	}
+	return &r, nil
+}
+
+func LinuxRelease() (*Release, error) {
+	uts := unix.Utsname{}
+	if err := unix.Uname(&uts); err != nil {
+		return nil, err
+	}
+	zi := bytes.Index(uts.Release[:], []byte{0})
+	releaseData := string(uts.Release[:zi])
+	return ParseUtsnameRelease(releaseData)
 }
