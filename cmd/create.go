@@ -50,6 +50,11 @@ var createCmd = cli.Command{
 			Usage: "path to statically-linked busybox binary",
 			Value: "/bin/busybox",
 		},
+		cli.StringFlag{
+			Name:  "runtime",
+			Usage: "(path to) runtime binary",
+			Value: "crio-lxc-start",
+		},
 	},
 }
 
@@ -233,22 +238,7 @@ func doCreate(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	cmd, err := startContainer(c, spec, ctx.Duration("timeout"))
-	if err != nil {
-		return errors.Wrap(err, "failed to start the container")
-	}
-
-	// conmon always passes a PID on create ?
-	pidfile := ctx.String("pid-file")
-	if pidfile != "" {
-		// conmon requires the PID from the crio-lxc wrapper
-		err := createPidFile(pidfile, cmd.Process.Pid)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create pid file %s", pidfile)
-		}
-	}
-	log.Infof("created container %s in lxcdir %s", containerID, LXC_PATH)
-	return nil
+	return startContainer(ctx, c, spec, ctx.Duration("timeout"))
 }
 
 func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -634,11 +624,10 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := c.SaveConfigFile(savedConfigFile); err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", savedConfigFile)
 	}
+	return nil
 
 	// copy config file for debugging purposes
-	exec.Command("cp", savedConfigFile, "/tmp/config."+c.Name()).Run()
-
-	return nil
+	// exec.Command("cp", savedConfigFile, "/tmp/config."+c.Name()).Run()
 }
 
 func makeSyncFifo(dir string) error {
@@ -651,19 +640,10 @@ func makeSyncFifo(dir string) error {
 	return nil
 }
 
-func startContainer(c *lxc.Container, spec *specs.Spec, timeout time.Duration) (*exec.Cmd, error) {
-	binary, err := os.Readlink("/proc/self/exe")
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.Command(
-		binary,
-		"internal",
-		c.Name(),
-		LXC_PATH,
-		filepath.Join(LXC_PATH, c.Name(), "config"),
-	)
+func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
+	configFilePath := filepath.Join(LXC_PATH, c.Name(), "config")
+	runtime := ctx.String("runtime")
+	cmd := exec.Command(runtime, c.Name(), LXC_PATH, configFilePath)
 
 	if !spec.Process.Terminal {
 		cmd.Stdin = os.Stdin
@@ -675,16 +655,33 @@ func startContainer(c *lxc.Container, spec *specs.Spec, timeout time.Duration) (
 		return cmd, err
 	}
 
-	// wait until lxc.init.cmd is executed
-	pollingStart := time.Now()
-	for {
-		if c.InitPid() > 1 {
-			return cmd, nil
+	log.Debugf("Starting runtime: %s", cmd.Args)
+	err := cmd.Start()
+	if err != nil {
+		return err
+	}
+	pidfile := ctx.String("pid-file")
+	if pidfile != "" {
+		err := createPidFile(pidfile, cmd.Process.Pid)
+		if err != nil {
+			return err
 		}
-		if time.Since(pollingStart) > timeout {
-			break
+	}
+
+	if !waitContainerCreated(c, timeout) {
+		return fmt.Errorf("container creation timeout (%s) expired", timeout)
+	}
+	return nil
+}
+
+func waitContainerCreated(c *lxc.Container, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pid, state := getContainerInitState(c)
+		if pid > 0 && state == stateCreated {
+			return true
 		}
 		time.Sleep(time.Millisecond * 50)
 	}
-	return cmd, fmt.Errorf("failed to retrieve the PID for lxc.init.cmd within %s", timeout)
+	return false
 }
