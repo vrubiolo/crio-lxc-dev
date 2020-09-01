@@ -43,7 +43,7 @@ var createCmd = cli.Command{
 		cli.DurationFlag{
 			Name:  "timeout",
 			Usage: "timeout for container creation",
-			Value: time.Second*30,
+			Value: time.Second * 5,
 		},
 		cli.StringFlag{
 			Name: "busybox-static",
