@@ -3,6 +3,7 @@ package main
 import (
 	stdlog "log"
 	"os"
+	"io/ioutil"
 
 	"github.com/apex/log"
 	"github.com/urfave/cli"
@@ -79,7 +80,10 @@ func main() {
 				stdlog.SetOutput(logFile)
 			}
 		} else {
-			stdlog.SetOutput(os.Stderr)
+			// Only write to the specified log-file. If log-file is unsed discard output.
+			// Writing to stderr is only allowed by OCI cmdline spec 
+			// if the command returns with an error.
+			stdlog.SetOutput(ioutil.Discard)
 		}
 		log.Debugf("cmdline: %s", os.Args)
 		return nil
