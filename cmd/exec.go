@@ -86,6 +86,8 @@ func doExec(ctx *cli.Context) error {
 		attachOpts.UID = int(procSpec.User.UID)
 		attachOpts.GID = int(procSpec.User.GID)
 		attachOpts.Cwd = procSpec.Cwd
+		// Do not inherit the parent process environment
+		attachOpts.ClearEnv = true
 		attachOpts.Env = procSpec.Env
 	} else {
 		// fall back to cmdline arguments
