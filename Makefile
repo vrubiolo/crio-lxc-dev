@@ -7,7 +7,7 @@ PACKAGES_DIR?=~/packages
 lint:
 	golangci-lint run -c ./lint.yaml ./...
 
-crio-lxc: $(GO_SRC) Makefile
+crio-lxc: $(GO_SRC) Makefile go.mod
 	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc ./cmd
 
 # make test TEST=basic will run only the basic test.
