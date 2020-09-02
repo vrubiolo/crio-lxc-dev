@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
 	stdlog "log"
 	"os"
-	"io/ioutil"
+	"runtime"
 
 	"github.com/apex/log"
 	"github.com/urfave/cli"
@@ -18,7 +20,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "crio-lxc"
 	app.Usage = "crio-lxc is a CRI compliant runtime wrapper for lxc"
-	app.Version = version
+	app.Version = fmt.Sprintf("%s (%s)", version, runtime.Version())
 	app.Commands = []cli.Command{
 		stateCmd,
 		createCmd,
@@ -81,7 +83,7 @@ func main() {
 			}
 		} else {
 			// Only write to the specified log-file. If log-file is unsed discard output.
-			// Writing to stderr is only allowed by OCI cmdline spec 
+			// Writing to stderr is only allowed by OCI cmdline spec
 			// if the command returns with an error.
 			stdlog.SetOutput(ioutil.Discard)
 		}
