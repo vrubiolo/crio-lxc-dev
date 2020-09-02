@@ -2,22 +2,13 @@ module github.com/lxc/crio-lxc
 
 require (
 	github.com/apex/log v1.9.0
-	github.com/aws/aws-sdk-go v1.20.8 // indirect
-	github.com/golang/protobuf v1.3.1 // indirect
-	github.com/onsi/ginkgo v1.8.0 // indirect
-	github.com/opencontainers/runtime-spec v1.0.1
+	github.com/opencontainers/runtime-spec v1.0.2
 	github.com/pkg/errors v0.9.1
-	github.com/segmentio/ksuid v1.0.3
-	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/u-root/u-root v6.0.0+incompatible
-	github.com/urfave/cli v1.20.0
-	golang.org/x/crypto v0.0.0-20190621222207-cc06ce4a13d4 // indirect
-	golang.org/x/sys v0.0.0-20200828150025-8dfe04af21d5
-	golang.org/x/text v0.3.2 // indirect
-	golang.org/x/tools v0.0.0-20190625160430-252024b82959 // indirect
+	github.com/urfave/cli v1.22.4
+	golang.org/x/sys v0.0.0-20200831180312-196b9ba8737a
 	gopkg.in/lxc/go-lxc.v2 v2.0.0-20200826211823-2dd0dc9c018b
-	gopkg.in/yaml.v2 v2.2.2 // indirect
 )
 
 replace github.com/vbatts/go-mtree v0.4.4 => github.com/vbatts/go-mtree v0.4.5-0.20190122034725-8b6de6073c1a
