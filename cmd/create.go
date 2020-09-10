@@ -178,6 +178,9 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	cmdFile := path.Join(spec.Root.Path, EXECUTE_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
 	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0555)
+	if logFilePath != "" {
+		ioutil.WriteFile(logFilePath+".init.sh", []byte(buf.String()), 0555)
+	}
 	if err != nil {
 		return err
 	}
@@ -254,9 +257,14 @@ func doCreate(ctx *cli.Context) error {
 	}
 	defer c.Release()
 
-	spec, err := readBundleSpec(filepath.Join(ctx.String("bundle"), "config.json"))
+	specPath := filepath.Join(ctx.String("bundle"), "config.json")
+	spec, err := readBundleSpec(specPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
+	}
+
+	if logFilePath != "" {
+		RunCommand("cp", specPath, logFilePath+".spec.json")
 	}
 
 	if err := os.MkdirAll(filepath.Join(LXC_PATH, containerID), 0770); err != nil {
@@ -671,21 +679,23 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	// if !spec.Process.Terminal {
 	// 	passFdsToContainer()
 	// }
-
 	return nil
 }
 
-func saveConfig(c *lxc.Container, configFilePath string) error {
+func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error {
 	log.Debugf("Saving config file %s", configFilePath)
 	// Write out final config file for debugging and use with lxc-attach:
 	// Do not edit config after this.
 	if err := c.SaveConfigFile(configFilePath); err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", configFilePath)
 	}
-	return nil
 
 	// copy config file for debugging purposes
-	// exec.Command("cp", savedConfigFile, "/tmp/config."+c.Name()).Run()
+	if logFilePath != "" {
+		exec.Command("cp", configFilePath, logFilePath+".config").Run()
+	}
+	return nil
+
 }
 
 func makeSyncFifo(dir string) error {
@@ -715,7 +725,7 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 		cmd.Stderr = os.Stderr
 	}
 
-	if err := saveConfig(c, configFilePath); err != nil {
+	if err := saveConfig(ctx, c, configFilePath); err != nil {
 		return err
 	}
 

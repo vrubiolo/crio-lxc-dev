@@ -110,7 +110,7 @@ func getContainerInitState(c *lxc.Container) (int, string) {
 		defer proc.Close()
 	}
 
-	// will fail if procfs is not mounted 
+	// will fail if procfs is not mounted
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
