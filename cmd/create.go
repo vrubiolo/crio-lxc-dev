@@ -103,11 +103,29 @@ const (
 	EXECUTE_CMD       = "/init.sh"
 )
 
+func getUserHome(spec *specs.Spec) string {
+	passwd := filepath.Join(spec.Root.Path, "/etc/passwd")
+
+	if _, err := os.Stat(passwd); err != nil {
+		// search for passwd in mounts
+		for _, m := range spec.Mounts {
+			if m.Destination == passwd {
+				passwd = m.Source
+				break
+			}
+		}
+	}
+	if u := GetUser(passwd, spec.Process.User.Username); u != nil && u.Home != "" {
+		return u.Home
+	}
+	return spec.Process.Cwd
+}
+
 // Write the container init command to a file.
 // The command file is then set as "lxc.execute.cmd"
 // Every command argument is quoted and shell specials are escaped
 // for `exec` to process them properly.
-func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
+func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	if err := c.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
@@ -129,6 +147,7 @@ func setInitCmd(c *lxc.Container, spec *specs.Spec) error {
 
 	// after exec /proc/{pid}/environ reflects the new state
 	fmt.Fprintf(&buf, "export %s\n", envStateRunning)
+	fmt.Fprintf(&buf, "export HOME=%s\n", getUserHome(spec))
 
 	// change to working directory before running exec
 	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
@@ -607,7 +626,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
 
-	if err := setInitCmd(c, spec); err != nil {
+	if err := setInitCmd(ctx, c, spec); err != nil {
 		return errors.Wrap(err, "failed to set lxc.init.cmd")
 	}
 

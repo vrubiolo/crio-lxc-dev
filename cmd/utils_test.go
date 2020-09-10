@@ -130,3 +130,27 @@ func TestKernelRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, r.Suffix)
 }
+
+func TestGetUser(t *testing.T) {
+	passwd := `root:x:0:0:root:/root:/bin/bash
+_apt:x:100:65534:xxx:/nonexistent:/usr/sbin/nologin
+systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin`
+
+	f, err := ioutil.TempFile("", "passwd")
+	require.NoError(t, err)
+	_, err = fmt.Fprintln(f, passwd)
+	require.NoError(t, err)
+	f.Close()
+
+	u := GetUser(f.Name(), "systemd-coredump")
+	require.NotNil(t, u)
+	require.Equal(t, "/", u.Home)
+
+	u = GetUser(f.Name(), "_apt")
+	require.NotNil(t, u)
+	require.Equal(t, "/nonexistent", u.Home)
+
+	u = GetUser(f.Name(), "root")
+	require.NotNil(t, u)
+	require.Equal(t, "/root", u.Home)
+}
