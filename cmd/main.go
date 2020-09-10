@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	version = ""
-	debug   = false
+	version     = ""
+	debug       = false
+	logFilePath = ""
 )
 
 func main() {
@@ -72,7 +73,7 @@ func main() {
 		if debug {
 			log.SetLevel(log.DebugLevel)
 		}
-		logFilePath := ctx.String("log-file")
+		logFilePath = ctx.String("log-file")
 		if logFilePath != "" {
 			f, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
 			if err != nil {
