@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -90,22 +91,39 @@ func RunCommand(args ...string) error {
 	return nil
 }
 
-func resolveRootfsSymlinks(rootfs string, dst string) (string, error) {
-	stat, err := os.Lstat(dst)
+func resolvePathRelative(rootfs string, currentPath string, subPath string) (string, error) {
+	log.Debugf("resolvePathRelative(currentPath:%s subPath:%s)", currentPath, subPath)
+	p := filepath.Join(currentPath, subPath)
+
+	stat, err := os.Lstat(p)
 	if err != nil {
-		return dst, err
+		// target does not exist, resolution ends here
+		return p, err
 	}
+
 	if stat.Mode()&os.ModeSymlink == 0 {
-		return dst, nil // not a symlink
+		log.Debugf("%s is not a symlink", p)
+		return p, nil
 	}
-	target, err := os.Readlink(dst)
+	// resolve symlink
+
+	linkDst, err := os.Readlink(p)
 	if err != nil {
-		return dst, err
+		return p, err
 	}
-	if !strings.HasPrefix(target, rootfs) {
-		return filepath.Join(rootfs, target), nil
+
+	log.Debugf("%s -> %s", p, linkDst)
+
+	// The destination of an absolute link must be prefixed with the rootfs
+	if filepath.IsAbs(linkDst) {
+		if filepath.HasPrefix(linkDst, rootfs) {
+			return p, nil
+		}
+		return filepath.Join(rootfs, linkDst), nil
 	}
-	return target, nil
+
+	// The link target is relative to currentPath.
+	return filepath.Clean(filepath.Join(currentPath, linkDst)), nil
 }
 
 // resolveMountDestination resolves mount destination paths for LXC.
@@ -124,21 +142,24 @@ func resolveRootfsSymlinks(rootfs string, dst string) (string, error) {
 //
 // The mount option `create=dir` should be set when the error os.ErrNotExist is returned.
 // The non-existent directories are then automatically created by LXC.
-func resolveMountDestination(rootfs string, dst string) (string, error) {
-	dst = strings.TrimPrefix(dst, "/")
-	entries := strings.Split(dst, "/")
-	dstPath := rootfs
+func resolveMountDestination(rootfs string, dst string) (dstPath string, err error) {
+	log.Debugf("resolveMountDestination(rootfs:%s dst:%s)", rootfs, dst)
+	// get path entries
+	entries := strings.Split(strings.TrimPrefix(dst, "/"), "/")
+
+	currentPath := rootfs
+	// start path resolution at rootfs
 	for i, entry := range entries {
-		dstPath = filepath.Join(dstPath, entry)
-		resolved, err := resolveRootfsSymlinks(rootfs, dstPath)
-		dstPath = resolved
+		currentPath, err = resolvePathRelative(rootfs, currentPath, entry)
+		log.Debugf("resolved %s : %s", currentPath, err)
 		if err != nil {
-			// The already resolved path is concatenated with the remaining path to be resolved,
+			// The already resolved path is concatenated with the remaining path,
 			// if resolution of path fails at some point.
-			return filepath.Join(dstPath, filepath.Join(entries[i+1:]...)), err
+			currentPath = filepath.Join(currentPath, filepath.Join(entries[i+1:]...))
+			break
 		}
 	}
-	return dstPath, nil
+	return currentPath, err
 }
 
 // createPidFile atomically creates a pid file for the given pid at the given path
