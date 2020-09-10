@@ -576,10 +576,18 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
 		// "github.com/docker/docker/pkg/symlink"
 		mountDest, err := resolveMountDestination(spec.Root.Path, ms.Destination)
+		// Intermediate path resolution failed. This is not an error, since
+		// the remaining directories / files are automatically created by lxc (create=dir|file)
 		if err != nil {
 			log.Debugf("resolveMountDestination: %s --> %s (err:%s)", ms.Destination, mountDest, err)
 		} else {
 			log.Debugf("resolveMountDestination: %s --> %s)", ms.Destination, mountDest)
+		}
+
+		// Check whether the resolved destination of the target link escapes the rootfs.
+		if !filepath.HasPrefix(mountDest, spec.Root.Path) {
+			// refuses mount destinations that escape from rootfs
+			return fmt.Errorf("security violation: resolved mount destination path %s escapes from container root %s", mountDest, spec.Root.Path)
 		}
 
 		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, mountDest, ms.Type, opts)
