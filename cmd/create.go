@@ -526,6 +526,15 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 	return c.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
+func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
+	for _, ns := range spec.Linux.Namespaces {
+		if ns.Type == nsType {
+			return true
+		}
+	}
+	return false
+}
+
 func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if ctx.Bool("debug") {
 		c.SetVerbosity(lxc.Verbose)
@@ -548,10 +557,15 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	}
 
 	for _, ms := range spec.Mounts {
-		// ignore cgroup mount, lxc automouts this even with lxc.rootfs.managed = 0
-		// conf.c:mount_entry:1854 - Device or resource busy - Failed to mount "cgroup" on "/usr/lib/x86_64-linux-gnu/lxc/rootfs/sys/fs/cgroup"
 		if ms.Type == "cgroup" {
-			continue
+			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
+			// from 'man lxc.container.conf':
+			// If cgroup namespaces are enabled, then any cgroup auto-mounting request will be ignored,
+			// since the container can mount the filesystems itself, and automounting can confuse the container.
+			// Make cgroup mountpoint optional if cgroup namespace is not enabled (shared or cloned)
+			if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
+				ms.Options = append(ms.Options, "optional")
+			}
 		}
 
 		// create target files and directories
