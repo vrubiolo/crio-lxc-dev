@@ -9,6 +9,7 @@ import (
 
 	"github.com/apex/log"
 	"github.com/urfave/cli"
+	"gopkg.in/lxc/go-lxc.v2"
 )
 
 var (
@@ -21,7 +22,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "crio-lxc"
 	app.Usage = "crio-lxc is a CRI compliant runtime wrapper for lxc"
-	app.Version = fmt.Sprintf("%s (%s)", version, runtime.Version())
+	app.Version = fmt.Sprintf("%s (%s) (lxc:%s)", version, runtime.Version(), lxc.Version())
 	app.Commands = []cli.Command{
 		stateCmd,
 		createCmd,
