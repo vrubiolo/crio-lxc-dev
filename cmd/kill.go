@@ -181,21 +181,23 @@ func doKill(ctx *cli.Context) error {
 		return errors.Wrap(err, "invalid signal param")
 	}
 
-	r, err := LinuxRelease()
-	if err != nil {
-		log.Errorf("failed to detect linux release: %s", err)
-	}
-
-	if err == nil && r.GreaterEqual(5, 8, 0) {
-		pidfd, err := c.InitPidFd()
+	/*
+		r, err := LinuxRelease()
 		if err != nil {
-			return err
+			log.Errorf("failed to detect linux release: %s", err)
 		}
-		defer pidfd.Close()
-		log.Debugf("pidfd_send_signal pidfd:%d signum:%d(%s)", pidfd, signum, signum)
-		return PidfdSendSignal(pidfd.Fd(), signum)
-	} else {
-		return killContainer(c, signum)
-	}
+
+		if err == nil && r.GreaterEqual(5, 8, 0) {
+			pidfd, err := c.InitPidFd()
+			if err != nil {
+				return err
+			}
+			defer pidfd.Close()
+			log.Debugf("pidfd_send_signal pidfd:%d signum:%d(%s)", pidfd, signum, signum)
+			return PidfdSendSignal(pidfd.Fd(), signum)
+		} else {
+	*/
+	return killContainer(c, signum)
+	//}
 	return nil
 }
