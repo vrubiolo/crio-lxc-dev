@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strings"
 
+	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -42,15 +42,6 @@ var execCmd = cli.Command{
 // NOTE stdio (stdout/stderr) is not attached when adding unix.CLONE_NEWUSER
 const EXEC_NAMESPACES = unix.CLONE_NEWIPC | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET | unix.CLONE_NEWCGROUP | unix.CLONE_NEWPID
 
-func debugf(ctx *cli.Context, format string, args ...interface{}) {
-	if ctx.Bool("debug") {
-		if !strings.HasSuffix(format, "\n") {
-			format += "\n"
-		}
-		fmt.Fprintf(os.Stderr, "debug "+format, args...)
-	}
-}
-
 func doExec(ctx *cli.Context) error {
 	containerID := ctx.Args().First()
 	if len(containerID) == 0 {
@@ -58,7 +49,7 @@ func doExec(ctx *cli.Context) error {
 		cli.ShowCommandHelpAndExit(ctx, "exec", 1)
 	}
 
-	debugf(ctx, "exec in container %s", containerID)
+	log.Debugf("exec in container %s", containerID)
 
 	c, err := lxc.NewContainer(containerID, LXC_PATH)
 	if err != nil {
@@ -72,7 +63,8 @@ func doExec(ctx *cli.Context) error {
 
 	var procArgs []string
 	specFilePath := ctx.String("process")
-	debugf(ctx, "reading process spec %s", specFilePath)
+	log.Debugf("reading process spec %s", specFilePath)
+
 	specData, err := ioutil.ReadFile(specFilePath)
 	if err == nil {
 		// prefer the process spec file
@@ -96,7 +88,7 @@ func doExec(ctx *cli.Context) error {
 		}
 	}
 
-	debugf(ctx, "process setup completed %v: %#v", procArgs, attachOpts)
+	log.Debugf("process setup completed %v: %#v", procArgs, attachOpts)
 
 	attachOpts.StdinFd = os.Stdin.Fd()
 	attachOpts.StdoutFd = os.Stdout.Fd()
@@ -104,18 +96,18 @@ func doExec(ctx *cli.Context) error {
 
 	if ctx.Bool("detach") {
 		pidFile := ctx.String("pid-file")
-		debugf(ctx, "detaching process")
+		log.Debugf("detaching process")
 		pid, err := c.RunCommandNoWait(procArgs, attachOpts)
 		if err != nil {
 			return errors.Wrapf(err, "c.RunCommandNoWait failed")
 		}
 		if pidFile == "" {
-			debugf(ctx, "detaching process but pid-file value is empty")
+			log.Debugf("detaching process but pid-file value is empty")
 			return nil
 		}
 		return createPidFile(pidFile, pid)
 	} else {
-		debugf(ctx, "run command synchronous")
+		log.Debugf("run command synchronous")
 		exitStatus, err := c.RunCommandStatus(procArgs, attachOpts)
 		if err != nil {
 			return errors.Wrapf(err, "Cmd returned with exit code %d", exitStatus)
