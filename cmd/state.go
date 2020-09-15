@@ -84,11 +84,12 @@ func doState(ctx *cli.Context) error {
 		Annotations: annotations,
 	}
 
-	switch c.State() {
+	switch state := c.State(); state {
 	case lxc.STARTING:
 		s.Status = stateCreating
 	case lxc.RUNNING, lxc.FROZEN, lxc.THAWED, lxc.STOPPING, lxc.ABORTING, lxc.FREEZING:
 		s.Pid, s.Status = getContainerInitState(c)
+		log.Debugf("container state: %s, init(pid:%s, state:%s)", state, s.Pid, s.Status)
 	case lxc.STOPPED:
 		s.Status = stateStopped
 	}
@@ -101,20 +102,25 @@ func doState(ctx *cli.Context) error {
 	return nil
 }
 
+// getContainerInitState returns the runtime state of the container.
+// It is used to determine whether the container state is 'created' or 'running'.
+// The init process environment contains #envStateCreated if the the container
+// is created, but not yet running/started.
+// This requires the proc filesystem to be mounted on the host.
 func getContainerInitState(c *lxc.Container) (int, string) {
 	pid, proc, err := safeGetInitPid(c)
 	if err != nil {
+		log.Debugf("failed to get the init pid state %s", err)
 		return -1, stateStopped
 	}
 	if proc != nil {
 		defer proc.Close()
 	}
 
-	// will fail if procfs is not mounted
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
-		log.Debugf("failed to read %s: %s", envFile, err)
+		log.Debugf("failed to read init process environment %s: %s", envFile, err)
 		return -1, stateStopped
 	}
 
@@ -123,9 +129,9 @@ func getContainerInitState(c *lxc.Container) (int, string) {
 		if env == envStateCreated {
 			return pid, stateCreated
 		}
-		if env == envStateRunning {
-			return pid, stateRunning
-		}
 	}
-	return pid, stateStopped
+	// the init process is runnig
+	// checking for the existence of #envStateRunning within the environment
+	// will not work for processes which call exec with a modified environment e.g the nginx image.
+	return pid, stateRunning
 }
