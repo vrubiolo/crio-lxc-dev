@@ -98,9 +98,10 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 }
 
 const (
-	SYNC_FIFO_PATH    = "/syncfifo"
+	CFG_DIR           = "/.crio-lxc"
+	SYNC_FIFO_PATH    = CFG_DIR + "/syncfifo"
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
-	EXECUTE_CMD       = "/init.sh"
+	EXECUTE_CMD       = CFG_DIR + "/init.sh"
 )
 
 func getUserHome(spec *specs.Spec) string {
@@ -267,7 +268,7 @@ func doCreate(ctx *cli.Context) error {
 		RunCommand("cp", specPath, logFilePath+".spec.json")
 	}
 
-	if err := os.MkdirAll(filepath.Join(LXC_PATH, containerID), 0770); err != nil {
+	if err := os.MkdirAll(filepath.Join(LXC_PATH, containerID, CFG_DIR), 0770); err != nil {
 		return errors.Wrap(err, "failed to create container dir")
 	}
 
@@ -699,7 +700,7 @@ func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error
 }
 
 func makeSyncFifo(dir string) error {
-	fifoFilename := filepath.Join(dir, "syncfifo")
+	fifoFilename := filepath.Join(dir, SYNC_FIFO_PATH)
 	prevMask := unix.Umask(0000)
 	defer unix.Umask(prevMask)
 	if err := unix.Mkfifo(fifoFilename, 0666); err != nil {
