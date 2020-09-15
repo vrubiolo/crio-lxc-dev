@@ -74,8 +74,7 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 	if exists, _ := pathExists(shPath); exists {
 		return nil
 	}
-	var err error
-	err = RunCommand("mkdir", "-p", filepath.Join(rootfs, "bin"))
+	err := RunCommand("mkdir", "-p", filepath.Join(rootfs, "bin"))
 	if err != nil {
 		return errors.Wrapf(err, "Failed doing mkdir")
 	}
@@ -98,9 +97,11 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 }
 
 const (
-	SYNC_FIFO_PATH    = "/syncfifo"
+	CFG_DIR           = "/.crio-lxc"
+	SYNC_FIFO         = "/syncfifo"
+	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
-	EXECUTE_CMD       = "/init.sh"
+	INIT_CMD          = CFG_DIR + "/init.sh"
 )
 
 func getUserHome(spec *specs.Spec) string {
@@ -175,16 +176,20 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 		buf.WriteRune('\n')
 	}
 
-	cmdFile := path.Join(spec.Root.Path, EXECUTE_CMD)
+	err := RunCommand("mkdir", "-p", filepath.Join(spec.Root.Path, CFG_DIR))
+	if err != nil {
+		return errors.Wrapf(err, "Failed creating %s", CFG_DIR)
+	}
+	cmdFile := path.Join(spec.Root.Path, INIT_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0555)
+	err = ioutil.WriteFile(cmdFile, []byte(buf.String()), 0555)
 	if logFilePath != "" {
 		ioutil.WriteFile(logFilePath+".init.sh", []byte(buf.String()), 0555)
 	}
 	if err != nil {
 		return err
 	}
-	return c.SetConfigItem("lxc.init.cmd", EXECUTE_CMD)
+	return c.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
 
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -269,10 +274,6 @@ func doCreate(ctx *cli.Context) error {
 
 	if err := os.MkdirAll(filepath.Join(LXC_PATH, containerID), 0770); err != nil {
 		return errors.Wrap(err, "failed to create container dir")
-	}
-
-	if err := makeSyncFifo(filepath.Join(LXC_PATH, containerID)); err != nil {
-		return errors.Wrap(err, "failed to make sync fifo")
 	}
 
 	if err := configureContainer(ctx, c, spec); err != nil {
@@ -647,9 +648,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
-	mnt := fmt.Sprintf("%s %s none ro,bind,create=file", path.Join(LXC_PATH, c.Name(), SYNC_FIFO_PATH), strings.Trim(SYNC_FIFO_PATH, "/"))
+	// create named fifo in lxcpath and mount it into the container
+	syncFifoHostPath := filepath.Join(LXC_PATH, c.Name(), SYNC_FIFO)
+	if err := makeSyncFifo(syncFifoHostPath); err != nil {
+		return errors.Wrapf(err, "failed to make sync fifo %s", syncFifoHostPath)
+	}
+	mnt := fmt.Sprintf("%s %s none ro,bind,create=file", syncFifoHostPath, strings.Trim(SYNC_FIFO_PATH, "/"))
 	if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-		return errors.Wrap(err, "failed to set syncfifo mount config entry")
+		return errors.Wrap(err, "failed to set sync fifo mount config entry")
 	}
 
 	if err := ensureShell(ctx, spec.Root.Path); err != nil {
@@ -698,8 +704,7 @@ func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error
 
 }
 
-func makeSyncFifo(dir string) error {
-	fifoFilename := filepath.Join(dir, "syncfifo")
+func makeSyncFifo(fifoFilename string) error {
 	prevMask := unix.Umask(0000)
 	defer unix.Umask(prevMask)
 	if err := unix.Mkfifo(fifoFilename, 0666); err != nil {
