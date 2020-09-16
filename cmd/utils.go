@@ -142,6 +142,9 @@ func resolvePathRelative(rootfs string, currentPath string, subPath string) (str
 //
 // The mount option `create=dir` should be set when the error os.ErrNotExist is returned.
 // The non-existent directories are then automatically created by LXC.
+
+// source /var/run/containers/storage/overlay-containers/51230afad17aa3b42901f6d9efcba406511821b7e18b2223a6b4c43f9327ce97/userdata/resolv.conf
+// destination /etc/resolv.conf
 func resolveMountDestination(rootfs string, dst string) (dstPath string, err error) {
 	log.Debugf("resolveMountDestination(rootfs:%s dst:%s)", rootfs, dst)
 	// get path entries

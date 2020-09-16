@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"golang.org/x/sys/unix"
+	"net"
 	"time"
 
 	"io/ioutil"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/apex/log"
+	"github.com/creack/pty"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -32,9 +34,9 @@ var createCmd = cli.Command{
 			Usage: "set bundle directory",
 			Value: ".",
 		},
-		cli.IntFlag{
+		cli.StringFlag{
 			Name:  "console-socket",
-			Usage: "pty master FD (not handled yet)", // TODO
+			Usage: "send container pty master fd to this socket path",
 		},
 		cli.StringFlag{
 			Name:  "pid-file",
@@ -713,31 +715,78 @@ func makeSyncFifo(fifoFilename string) error {
 	return nil
 }
 
+func startConsole(cmd *exec.Cmd, consoleSocket string) error {
+	addr, err := net.ResolveUnixAddr("unix", consoleSocket)
+	if err != nil {
+		return errors.Wrap(err, "failed to resolve console socket")
+	}
+	conn, err := net.DialUnix("unix", nil, addr)
+	if err != nil {
+		return errors.Wrap(err, "connecting to console socket failed")
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(time.Second * 10)
+	err = conn.SetDeadline(deadline)
+	if err != nil {
+		return errors.Wrap(err, "failed to set connection deadline")
+	}
+
+	sockFile, err := conn.File()
+	if err != nil {
+		return errors.Wrap(err, "failed to get file from unix connection")
+	}
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return errors.Wrap(err, "failed to start with pty")
+	}
+	defer ptmx.Close()
+
+	// Send the pty file descriptor over the console socket (to the 'conmon' process)
+	// For technical backgrounds see:
+	// man sendmsg 2', 'man unix 3', 'man cmsg 1'
+	// see https://blog.cloudflare.com/know-your-scm_rights/
+	oob := unix.UnixRights(int(ptmx.Fd()))
+	// Don't know whether 'terminal' is the right data to send, but conmon doesn't care anyway.
+	err = unix.Sendmsg(int(sockFile.Fd()), []byte("terminal"), oob, nil, 0)
+	if err != nil {
+		return errors.Wrap(err, "failed to send console fd")
+	}
+	return nil
+}
+
 func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
 	configFilePath := filepath.Join(LXC_PATH, c.Name(), "config")
 	runtime := ctx.String("runtime")
 	cmd := exec.Command(runtime, c.Name(), LXC_PATH, configFilePath)
-
-	if !spec.Process.Terminal {
-		// Inherit stdio from calling process (conmon)
-		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
-		// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
-		if err := c.SetConfigItem("lxc.console.path", "none"); err != nil {
-			return errors.Wrapf(err, "failed to disable PTY")
-		}
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-
-	if err := saveConfig(ctx, c, configFilePath); err != nil {
-		return err
-	}
-
 	log.Debugf("Starting runtime: %s", cmd.Args)
-	err := cmd.Start()
-	if err != nil {
-		return err
+
+	if consoleSocket := ctx.String("console-socket"); consoleSocket != "" {
+		if err := saveConfig(ctx, c, configFilePath); err != nil {
+			return err
+		}
+		err := startConsole(cmd, consoleSocket)
+		if err != nil {
+			return err
+		}
+	} else {
+		if !spec.Process.Terminal {
+			// Inherit stdio from calling process (conmon)
+			// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
+			// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
+			if err := c.SetConfigItem("lxc.console.path", "none"); err != nil {
+				return errors.Wrapf(err, "failed to disable PTY")
+			}
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		if err := saveConfig(ctx, c, configFilePath); err != nil {
+			return err
+		}
+		err := cmd.Start()
+		if err != nil {
+			return err
+		}
 	}
 	pidfile := ctx.String("pid-file")
 	if pidfile != "" {

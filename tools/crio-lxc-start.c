@@ -41,11 +41,8 @@ void main(int argc, char** argv)
 
 	// If this is non interactive, get rid of our controlling terminal,
 	// since we don't want lxc's setting of ISIG to ignore user's ^Cs.
-	if (setsid() == -1) {
-		err = errno;
-		fprintf(stderr, "setsid() failed with error %s\n", strerror(errno));
-		goto out;
-	}
+	// Ignore any error - because controlling terminal could be a PTY
+	setsid();
 
 	name = argv[1];
 	lxcpath = argv[2];

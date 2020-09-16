@@ -2,6 +2,7 @@ module github.com/lxc/crio-lxc
 
 require (
 	github.com/apex/log v1.9.0
+	github.com/creack/pty v1.1.11
 	github.com/opencontainers/runtime-spec v1.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.6.1
