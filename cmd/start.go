@@ -6,11 +6,9 @@ import (
 	"path/filepath"
 
 	"github.com/apex/log"
-	//	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
-	//lxc "gopkg.in/lxc/go-lxc.v2"
-  "time"
+	"time"
 )
 
 var startCmd = cli.Command{
@@ -21,6 +19,13 @@ var startCmd = cli.Command{
 
 starts <containerID>
 `,
+	Flags: []cli.Flag{
+		cli.DurationFlag{
+			Name:  "syncfifo-timeout",
+			Usage: "timeout for reading from syncfifo ",
+			Value: time.Second * 5,
+		},
+	},
 }
 
 func doStart(ctx *cli.Context) error {
@@ -29,24 +34,9 @@ func doStart(ctx *cli.Context) error {
 		fmt.Fprintf(os.Stderr, "missing container ID\n")
 		cli.ShowCommandHelpAndExit(ctx, "state", 1)
 	}
-
-	/*
-		log.Infof("about to create container")
-		c, err := lxc.NewContainer(containerID, LXC_PATH)
-		if err != nil {
-			return errors.Wrap(err, "failed to load container")
-		}
-		defer c.Release()
-		log.Infof("checking if running")
-		if !c.Running() {
-			return fmt.Errorf("'%s' is not ready", containerID)
-		}
-		log.Infof("not running, can start")
-	*/
-
 	fifoPath := filepath.Join(LXC_PATH, containerID, SYNC_FIFO)
 	log.Infof("opening fifo '%s'", fifoPath)
-	f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
+	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	if err != nil {
 		return errors.Wrap(err, "container not started - failed to open sync fifo")
 	}
@@ -69,7 +59,7 @@ func doStart(ctx *cli.Context) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(5 * time.Second):
+	case <-time.After(ctx.Duration("syncfifo-timeout")):
 		return fmt.Errorf("timeout reading from syncfifo %s:", fifoPath)
 	}
 }
