@@ -390,8 +390,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	c.SetConfigItem("lxc.cgroup.relative", "1")
 
-	// autodev is required
-	c.SetConfigItem("lxc.autodev", "1") // TODO  create /dev/null ?
+	// autodev is required ?
+	c.SetConfigItem("lxc.autodev", "0") // TODO  create /dev/null ?
 	// if autodev is disable lxc spits out these warnings:
 	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
 	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
@@ -563,11 +563,31 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
 	}
 
-	if err := c.SetConfigItem("lxc.rootfs.options", ""); err != nil {
+	mounts := spec.Mounts
+
+	// create named fifo in lxcpath and mount it into the container
+	syncFifoHostPath := filepath.Join(LXC_PATH, c.Name(), SYNC_FIFO)
+	if err := makeSyncFifo(syncFifoHostPath); err != nil {
+		return errors.Wrapf(err, "failed to make sync fifo %s", syncFifoHostPath)
+	}
+	mounts = append(mounts, specs.Mount{
+		Source:      syncFifoHostPath,
+		Destination: strings.Trim(SYNC_FIFO_PATH, "/"),
+		Type:        "bind",
+		Options:     []string{"bind", "ro", "create=file"},
+	})
+
+	rootfsOptions := ""
+	if spec.Root.Readonly {
+		rootfsOptions = "ro"
+		// Bug in lxc ? (rootfs should be mounted readonly after all mounts destination directories have been created ?)
+		// https://github.com/lxc/lxc/issues/1702
+	}
+	if err := c.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
 		return errors.Wrap(err, "failed to set lxc.rootfs.options")
 	}
 
-	for _, ms := range spec.Mounts {
+	for _, ms := range mounts {
 		if ms.Type == "cgroup" {
 			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
 			// from 'man lxc.container.conf':
@@ -579,30 +599,11 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 			}
 		}
 
-		// create target files and directories
-		info, err := os.Stat(ms.Source)
-		if err == nil {
-			if info.IsDir() {
-				ms.Options = append(ms.Options, "create=dir")
-			} else {
-				ms.Options = append(ms.Options, "create=file")
-			}
-		} else {
-			// This case catches all kind of virtual and remote filesystems (/dev/pts, /dev/shm, sysfs, procfs, dev ...)
-			// It can never be a file because the source file for a bind mount must exist.
-			if os.IsNotExist(err) {
-				ms.Options = append(ms.Options, "create=dir")
-			} else {
-				log.Debugf("failed to stat source %s of mountpoint %s: %s", ms.Source, ms.Destination, err)
-			}
-		}
-		opts := strings.Join(ms.Options, ",")
-
 		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
 		// "github.com/docker/docker/pkg/symlink"
 		mountDest, err := resolveMountDestination(spec.Root.Path, ms.Destination)
 		// Intermediate path resolution failed. This is not an error, since
-		// the remaining directories / files are automatically created by lxc (create=dir|file)
+		// the remaining directories / files are automatically created (create=dir|file)
 		if err != nil {
 			log.Debugf("resolveMountDestination: %s --> %s (err:%s)", ms.Destination, mountDest, err)
 		} else {
@@ -614,8 +615,19 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 			// refuses mount destinations that escape from rootfs
 			return fmt.Errorf("security violation: resolved mount destination path %s escapes from container root %s", mountDest, spec.Root.Path)
 		}
+		ms.Destination = mountDest
 
-		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, mountDest, ms.Type, opts)
+		_, err = os.Stat(ms.Destination)
+		if os.IsNotExist(err) {
+			createMountDestination(spec, &ms)
+		} else {
+			if err != nil {
+				return errors.Wrapf(err, "mount destination %s unavailable", ms.Destination)
+			}
+		}
+
+		opts := strings.Join(ms.Options, ",")
+		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, opts)
 		log.Debugf("adding mount entry %q", mnt)
 
 		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
@@ -650,16 +662,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
-	// create named fifo in lxcpath and mount it into the container
-	syncFifoHostPath := filepath.Join(LXC_PATH, c.Name(), SYNC_FIFO)
-	if err := makeSyncFifo(syncFifoHostPath); err != nil {
-		return errors.Wrapf(err, "failed to make sync fifo %s", syncFifoHostPath)
-	}
-	mnt := fmt.Sprintf("%s %s none ro,bind,create=file", syncFifoHostPath, strings.Trim(SYNC_FIFO_PATH, "/"))
-	if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-		return errors.Wrap(err, "failed to set sync fifo mount config entry")
-	}
-
 	if err := ensureShell(ctx, spec.Root.Path); err != nil {
 		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
@@ -683,10 +685,46 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := configureContainerSecurity(ctx, c, spec); err != nil {
 		return errors.Wrap(err, "failed to configure container security")
 	}
+	return nil
+}
 
-	// if !spec.Process.Terminal {
-	// 	passFdsToContainer()
-	// }
+// createMountDestination creates non-existent mount destination paths.
+// This is required if rootfs is mounted readonly.
+// When the source is a file that should be bind mounted a destination file is created.
+// In any other case a target directory is created.
+// We add 'create=dir' or 'create=file' to mount options because the mount destination
+// may be shadowed by a previous mount. In this case lxc will create the mount destination.
+func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
+	if ms.Type == "bind" {
+		info, err := os.Stat(ms.Source)
+		if err != nil {
+			return errors.Wrapf(err, "source %s for bind mount does not exist", ms.Source)
+		}
+		if !info.IsDir() {
+			log.Debugf("creating mount target file %s", ms.Destination)
+			ms.Options = append(ms.Options, "create=file")
+			// source exists and is not a directory
+			// create a target file that can be used as target for a bind mount
+			err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
+			if err != nil {
+				return errors.Wrap(err, "failed to create mount destination dir")
+			}
+			f, err := os.OpenFile(ms.Destination, os.O_CREATE, 0440)
+			if err != nil {
+				return errors.Wrap(err, "failed to create mount destination file")
+			}
+			return f.Close()
+		}
+	}
+
+	ms.Options = append(ms.Options, "create=dir")
+	log.Debugf("creating mount target destination %s", ms.Destination)
+	if filepath.Base(ms.Destination) != filepath.Join(spec.Root.Path, "/dev") {
+		err := os.MkdirAll(ms.Destination, 0755)
+		if err != nil {
+			return errors.Wrap(err, "failed to create mount destination")
+		}
+	}
 	return nil
 }
 
