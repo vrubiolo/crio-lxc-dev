@@ -365,8 +365,8 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 	return nil
 }
 
-func ensureDevNull(linux *specs.Linux) {
-	for _, dev := range linux.Devices {
+func ensureDevNull(spec *specs.Spec) {
+	for _, dev := range spec.Linux.Devices {
 		if dev.Path == "/dev/null" {
 			return
 		}
@@ -374,7 +374,7 @@ func ensureDevNull(linux *specs.Linux) {
 	mode := os.ModePerm
 	var uid, gid uint32 = 0, 0
 	devNull := specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3, FileMode: &mode, UID: &uid, GID: &gid}
-	linux.Devices = append(linux.Devices, devNull)
+	spec.Linux.Devices = append(spec.Linux.Devices, devNull)
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -392,6 +392,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	// autodev is required ?
 	c.SetConfigItem("lxc.autodev", "0") // TODO  create /dev/null ?
+	ensureDevNull(spec)
 	// if autodev is disable lxc spits out these warnings:
 	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
 	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
