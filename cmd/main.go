@@ -54,6 +54,15 @@ func main() {
 			Name:  "systemd-cgroup",
 			Usage: "enable systemd cgroup",
 		},
+		cli.DurationFlag{
+		  Name: "delete-wait",
+		  Usage: "number of seconds to wait before deleting container. to inspect container root for debugging purposes only.",
+		},
+		cli.StringFlag{
+		  Name: "debug-dir",
+		  Usage: "Directory to save debugging information to.",
+		  Value: "/var/log/crio-lxc",
+		},
 	}
 
 	log.SetLevel(log.InfoLevel)

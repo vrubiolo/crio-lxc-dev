@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 	"os"
 	"path/filepath"
 
@@ -53,16 +54,25 @@ func doDelete(ctx *cli.Context) error {
 	if err := configureLogging(ctx, c); err != nil {
 		return errors.Wrap(err, "failed to configure logging")
 	}
+ 
+ // copy CFG_DIR ?
+  if wait := ctx.Duration("delete-wait"); wait != 0 {
+    log.Warnf("waiting '%s' seconds before deleting container")
+    time.Sleep(wait)
+  }
+
 
 	state := c.State()
 	if state != lxc.STOPPED {
 		if !ctx.Bool("force") {
 			return fmt.Errorf("container %s must be stopped before delete - current state is %s", containerID, state)
 		}
+
 		if err := c.Stop(); err != nil {
 			log.Warnf("failed to stop container %s: %v", containerID, err)
 		}
 	}
+
 	// TODO: lxc-destroy deletes the rootfs.
 	// this appears to contradict the runtime spec:
 
