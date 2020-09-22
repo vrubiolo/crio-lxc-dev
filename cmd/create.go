@@ -391,7 +391,6 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	// autodev is required ?
 	c.SetConfigItem("lxc.autodev", "0") // TODO  create /dev/null ?
-	ensureDevNull(spec)
 	// if autodev is disable lxc spits out these warnings:
 	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
 	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
@@ -514,11 +513,11 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 	}
 	defer f.Close()
 
-	//ensureDevNull(spec.Linux)
+	ensureDevNull(spec)
 
 	fmt.Fprintln(f, "#!/bin/sh")
 	for _, dev := range spec.Linux.Devices {
-		mode := os.FileMode(0400) // umask ?
+		mode := os.FileMode(0600) // umask ?
 		if dev.FileMode != nil {
 			mode = *dev.FileMode
 		}
