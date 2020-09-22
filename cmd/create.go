@@ -508,7 +508,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 // The hook is run within the host namespace, after all rootfs setup is completed.
 func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	hookPath := filepath.Join(spec.Root.Path, "hook_create_devices.sh")
+	hookPath := filepath.Join(spec.Root.Path, CFG_DIR, "create_devices.sh")
 	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
 	if err != nil {
 		return err
