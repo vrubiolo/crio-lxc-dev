@@ -186,7 +186,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	cmdFile := lxcPathDir(c, INIT_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0555)
+	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0700)
 	if err != nil {
 		return err
 	}
