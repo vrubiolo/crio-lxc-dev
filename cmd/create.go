@@ -100,7 +100,7 @@ func ensureShell(ctx *cli.Context, rootfs string) error {
 }
 
 const (
-  // CFG_DIR is bind mounted (readonly) to container 
+	// CFG_DIR is bind mounted (readonly) to container
 	CFG_DIR           = "/.crio-lxc"
 	SYNC_FIFO         = "/syncfifo"
 	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
@@ -109,7 +109,7 @@ const (
 )
 
 func lxcPathDir(c *lxc.Container, subpath ...string) string {
-  return filepath.Join(LXC_PATH, c.Name(), filepath.Join(subpath...))
+	return filepath.Join(LXC_PATH, c.Name(), filepath.Join(subpath...))
 }
 
 func getUserHome(spec *specs.Spec) string {
@@ -186,9 +186,14 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	cmdFile := lxcPathDir(c, INIT_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0700)
+	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0500)
 	if err != nil {
 		return err
+	}
+	// check that the int script can be executed
+	err = unix.Access(cmdFile, unix.X_OK)
+	if err != nil {
+		return errors.Wrapf(err, "missing 'exec' permissions for %s (filesystem mounted with 'noexec' ?)", cmdFile)
 	}
 	return c.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
@@ -513,7 +518,7 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 	}
 	defer f.Close()
 
-	ensureDevNull(spec)
+	//ensureDevNull(spec)
 
 	fmt.Fprintln(f, "#!/bin/sh")
 	for _, dev := range spec.Linux.Devices {
@@ -562,11 +567,11 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set rootfs.managed to 0")
 	}
 
-	err := RunCommand("mkdir", "-p", filepath.Join(spec.Root.Path, CFG_DIR))
+	err := RunCommand("mkdir", "-p", "-m", "0750", filepath.Join(spec.Root.Path, CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
 	}
-	err = RunCommand("mkdir", "-p", lxcPathDir(c, CFG_DIR))
+	err = RunCommand("mkdir", "-p", "-m", "0750", lxcPathDir(c, CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
 	}
@@ -577,7 +582,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		Source:      lxcPathDir(c, CFG_DIR),
 		Destination: strings.Trim(CFG_DIR, "/"),
 		Type:        "bind",
-		Options:     []string{"bind", "ro", "create=dir"},
+		Options:     []string{"bind", "ro"},
 	})
 
 	// create named fifo in lxcpath and mount it into the container

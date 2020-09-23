@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"time"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/apex/log"
 	"github.com/pkg/errors"
@@ -54,13 +54,12 @@ func doDelete(ctx *cli.Context) error {
 	if err := configureLogging(ctx, c); err != nil {
 		return errors.Wrap(err, "failed to configure logging")
 	}
- 
- // copy CFG_DIR ?
-  if wait := ctx.Duration("delete-wait"); wait != 0 {
-    log.Warnf("waiting '%s' seconds before deleting container")
-    time.Sleep(wait)
-  }
 
+	// copy CFG_DIR ?
+	if wait := ctx.Duration("delete-wait"); wait != 0 {
+		log.Warnf("waiting '%s' seconds before deleting container")
+		time.Sleep(wait)
+	}
 
 	state := c.State()
 	if state != lxc.STOPPED {

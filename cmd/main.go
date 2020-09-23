@@ -55,13 +55,13 @@ func main() {
 			Usage: "enable systemd cgroup",
 		},
 		cli.DurationFlag{
-		  Name: "delete-wait",
-		  Usage: "number of seconds to wait before deleting container. to inspect container root for debugging purposes only.",
+			Name:  "delete-wait",
+			Usage: "number of seconds to wait before deleting container. to inspect container root for debugging purposes only.",
 		},
 		cli.StringFlag{
-		  Name: "debug-dir",
-		  Usage: "Directory to save debugging information to.",
-		  Value: "/var/log/crio-lxc",
+			Name:  "debug-dir",
+			Usage: "Directory to save debugging information to.",
+			Value: "/var/log/crio-lxc",
 		},
 	}
 
@@ -79,6 +79,7 @@ func main() {
 
 	app.Before = func(ctx *cli.Context) error {
 		LXC_PATH = ctx.String("lxc-path")
+
 		debug = ctx.Bool("debug")
 		if debug {
 			log.SetLevel(log.DebugLevel)
