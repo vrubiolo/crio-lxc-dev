@@ -105,6 +105,7 @@ func main() {
 
 	if err := app.Run(os.Args); err != nil {
 		log.Errorf("%+v", err)
+		println(err.Error())
 		os.Exit(1)
 	}
 }

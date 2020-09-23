@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/apex/log"
 	"github.com/pkg/errors"
@@ -34,7 +33,7 @@ func doStart(ctx *cli.Context) error {
 		fmt.Fprintf(os.Stderr, "missing container ID\n")
 		cli.ShowCommandHelpAndExit(ctx, "state", 1)
 	}
-	fifoPath := filepath.Join(LXC_PATH, containerID, SYNC_FIFO)
+	fifoPath := lxcPathDir(containerID, SYNC_FIFO_PATH)
 	log.Infof("opening fifo '%s'", fifoPath)
 	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	if err != nil {

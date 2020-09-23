@@ -75,6 +75,8 @@ void main(int argc, char** argv)
 		kill(0, WTERMSIG(c->error_num));
 
 out:
+  // TODO create a .exit_status file in the lxcpath dir
+  //  to let lxc-delete keep lxc resources !!! 
 	lxc_container_put(c);
 	exit(err);
 }

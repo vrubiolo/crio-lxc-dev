@@ -108,8 +108,8 @@ const (
 	INIT_CMD          = CFG_DIR + "/init.sh"
 )
 
-func lxcPathDir(c *lxc.Container, subpath ...string) string {
-	return filepath.Join(LXC_PATH, c.Name(), filepath.Join(subpath...))
+func lxcPathDir(containerID string, subpath ...string) string {
+	return filepath.Join(LXC_PATH, containerID, filepath.Join(subpath...))
 }
 
 func getUserHome(spec *specs.Spec) string {
@@ -184,7 +184,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 		buf.WriteRune('\n')
 	}
 
-	cmdFile := lxcPathDir(c, INIT_CMD)
+	cmdFile := lxcPathDir(c.Name(), INIT_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
 	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0500)
 	if err != nil {
@@ -511,7 +511,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 // The hook is run within the host namespace, after all rootfs setup is completed.
 func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	hookPath := lxcPathDir(c, "create_devices.sh")
+	hookPath := lxcPathDir(c.Name(), "create_devices.sh")
 	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
 	if err != nil {
 		return err
@@ -520,9 +520,10 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 
 	//ensureDevNull(spec)
 
-	fmt.Fprintln(f, "#!/bin/sh")
+	fmt.Fprintln(f, "#!/bin/sh -x")
+	fmt.Fprintf(f, "cd $LXC_ROOTFS_MOUNT\n")
 	for _, dev := range spec.Linux.Devices {
-		mode := os.FileMode(0600) // umask ?
+		mode := os.FileMode(0777) // umask ?
 		if dev.FileMode != nil {
 			mode = *dev.FileMode
 		}
@@ -534,10 +535,13 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 		if dev.GID != nil {
 			gid = *dev.GID
 		}
-		devPath := filepath.Join(spec.Root.Path, dev.Path)
-		fmt.Fprintf(f, "mknod -m %#o %s %s %d %d\n", mode, devPath, dev.Type, dev.Major, dev.Minor)
-		fmt.Fprintf(f, "chown %d:%d %s\n", uid, gid, devPath)
+		//fmt.Fprintf(f, "if ! [ -e \".%s\" ]; then\n", dev.Path)
+		fmt.Fprintf(f, "mkdir -p .%s\n", filepath.Dir(dev.Path))
+		fmt.Fprintf(f, "mknod -m %#o .%s %s %d %d || exit 1\n", mode, dev.Path, dev.Type, dev.Major, dev.Minor)
+		fmt.Fprintf(f, "chown -v %d:%d .%s || exit 1\n", uid, gid, dev.Path)
+	  //fmt.Fprintf(f, "fi\n")
 	}
+	//fmt.Fprintf(f, "sleep 1\n")
 	return c.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
@@ -571,7 +575,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
 	}
-	err = RunCommand("mkdir", "-p", "-m", "0750", lxcPathDir(c, CFG_DIR))
+	err = RunCommand("mkdir", "-p", "-m", "0750", lxcPathDir(c.Name(), CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
 	}
@@ -579,14 +583,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	mounts := spec.Mounts
 
 	mounts = append(mounts, specs.Mount{
-		Source:      lxcPathDir(c, CFG_DIR),
+		Source:      lxcPathDir(c.Name(), CFG_DIR),
 		Destination: strings.Trim(CFG_DIR, "/"),
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
 
 	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(lxcPathDir(c, SYNC_FIFO_PATH)); err != nil {
+	if err := makeSyncFifo(lxcPathDir(c.Name(), SYNC_FIFO_PATH)); err != nil {
 		return errors.Wrapf(err, "failed to make sync fifo")
 	}
 
