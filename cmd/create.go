@@ -561,7 +561,7 @@ func accessMask(stat os.FileMode) string {
     pos1 += 1
   }
 
-  return fmt.Sprintf("%d%03o", pos1, stat.Perm())
+  return fmt.Sprintf("0%d%03o", pos1, stat.Perm())
 }
 
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
