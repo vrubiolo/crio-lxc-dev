@@ -156,14 +156,14 @@ systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin`
 }
 
 func TestAccessMask(t *testing.T) {
-  // setuid 4, setgid 2, sticky 1
-  require.Equal(t, "01707", accessMask(0707 | os.ModeSticky))
-  require.Equal(t, "01777", accessMask(os.ModePerm | os.ModeSticky))
-  require.Equal(t, "02777", accessMask(os.ModePerm | os.ModeSetgid))
-  require.Equal(t, "04777", accessMask(os.ModePerm | os.ModeSetuid))
+	// setuid 4, setgid 2, sticky 1
+	require.Equal(t, "01707", accessMask(0707|os.ModeSticky))
+	require.Equal(t, "01777", accessMask(os.ModePerm|os.ModeSticky))
+	require.Equal(t, "02777", accessMask(os.ModePerm|os.ModeSetgid))
+	require.Equal(t, "04777", accessMask(os.ModePerm|os.ModeSetuid))
 
-  require.Equal(t, "03777", accessMask(os.ModePerm| os.ModeSticky | os.ModeSetgid))
-  require.Equal(t, "05777", accessMask(os.ModePerm| os.ModeSticky | os.ModeSetuid))
-  require.Equal(t, "06777", accessMask(os.ModePerm| os.ModeSetgid | os.ModeSetuid))
-  require.Equal(t, "07777", accessMask(os.ModePerm| os.ModeSticky | os.ModeSetgid | os.ModeSetuid))
+	require.Equal(t, "03777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid))
+	require.Equal(t, "05777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetuid))
+	require.Equal(t, "06777", accessMask(os.ModePerm|os.ModeSetgid|os.ModeSetuid))
+	require.Equal(t, "07777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid|os.ModeSetuid))
 }

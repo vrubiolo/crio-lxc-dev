@@ -17,7 +17,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
@@ -28,33 +28,24 @@ var createCmd = cli.Command{
 	ArgsUsage: "<containerID>",
 	Action:    doCreate,
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
+			// Is the bundle directory the runtime-root ?
 			Name:  "bundle",
 			Usage: "set bundle directory",
 			Value: ".",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "console-socket",
 			Usage: "send container pty master fd to this socket path",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "pid-file",
 			Usage: "path to write container PID",
 		},
-		cli.DurationFlag{
+		&cli.DurationFlag{
 			Name:  "timeout",
 			Usage: "timeout for container creation",
 			Value: time.Second * 5,
-		},
-		cli.StringFlag{
-			Name:  "busybox-static",
-			Usage: "path to statically-linked busybox binary",
-			Value: "/bin/busybox",
-		},
-		cli.StringFlag{
-			Name:  "runtime",
-			Usage: "(path to) runtime binary",
-			Value: "crio-lxc-start",
 		},
 	},
 }
@@ -107,10 +98,6 @@ const (
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
 	INIT_CMD          = CFG_DIR + "/init.sh"
 )
-
-func lxcPathDir(containerID string, subpath ...string) string {
-	return filepath.Join(LXC_PATH, containerID, filepath.Join(subpath...))
-}
 
 func getUserHome(spec *specs.Spec) string {
 	passwd := filepath.Join(spec.Root.Path, "/etc/passwd")
@@ -184,7 +171,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 		buf.WriteRune('\n')
 	}
 
-	cmdFile := lxcPathDir(c.Name(), INIT_CMD)
+	cmdFile := clxc.RuntimePath(INIT_CMD)
 	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
 	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0500)
 	if err != nil {
@@ -242,44 +229,43 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 }
 
 func doCreate(ctx *cli.Context) error {
-	containerID := ctx.Args().Get(0)
-	if len(containerID) == 0 {
-		fmt.Fprintf(os.Stderr, "missing container ID\n")
-		cli.ShowCommandHelpAndExit(ctx, "create", 1)
-	}
-
 	if err := checkRuntime(ctx); err != nil {
-		return errors.Wrap(err, "runtime requiements check failed")
+		return errors.Wrap(err, "runtime requirements check failed")
 	}
 
-	log.Infof("creating container %s", containerID)
+	err := clxc.LoadContainer()
+	if err == nil {
+		return fmt.Errorf("container already exists")
+	}
 
-	exists, err := containerExists(containerID)
+	err = clxc.CreateContainer()
 	if err != nil {
-		return errors.Wrap(err, "failed to check if container exists")
+		return errors.Wrap(err, "failed to create container")
 	}
-	if exists {
-		return fmt.Errorf("container '%s' already exists", containerID)
+	c := clxc.Container
+
+	if err := c.SetConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
+		return errors.Wrapf(err, "failed to lxc.log.file: '%s'", clxc.LogFilePath)
 	}
 
-	c, err := lxc.NewContainer(containerID, LXC_PATH)
+	err = c.SetLogLevel(clxc.LogLevel)
 	if err != nil {
-		return errors.Wrap(err, "failed to create new container")
+		return errors.Wrap(err, "failed to set container loglevel")
 	}
-	defer c.Release()
+	if clxc.LogLevel == lxc.TRACE {
+		c.SetVerbosity(lxc.Verbose)
+	}
 
 	specPath := filepath.Join(ctx.String("bundle"), "config.json")
+	/*
+	  err =	RunCommand("cp", specPath, lxcPathDir("spec.json"))
+	  if err != nil {
+	    return errors.Wrap(err, "failed to copy bundle spec")
+	  }
+	*/
 	spec, err := readBundleSpec(specPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
-	}
-
-	if logFilePath != "" {
-		RunCommand("cp", specPath, logFilePath+".spec.json")
-	}
-
-	if err := os.MkdirAll(filepath.Join(LXC_PATH, containerID), 0770); err != nil {
-		return errors.Wrap(err, "failed to create container dir")
 	}
 
 	if err := configureContainer(ctx, c, spec); err != nil {
@@ -511,7 +497,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 // The hook is run within the host namespace, after all rootfs setup is completed.
 func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	hookPath := lxcPathDir(c.Name(), "create_devices.sh")
+	hookPath := clxc.RuntimePath("create_devices.sh")
 	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
 	if err != nil {
 		return err
@@ -539,29 +525,29 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 		fmt.Fprintf(f, "mkdir -p .%s\n", filepath.Dir(dev.Path))
 		fmt.Fprintf(f, "mknod -m %s .%s %s %d %d || exit 1\n", accessMask(mode), dev.Path, dev.Type, dev.Major, dev.Minor)
 		fmt.Fprintf(f, "chown -v %d:%d .%s || exit 1\n", uid, gid, dev.Path)
-	  //fmt.Fprintf(f, "fi\n")
+		//fmt.Fprintf(f, "fi\n")
 	}
 	//fmt.Fprintf(f, "sleep 1\n")
 	return c.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
 func accessMask(stat os.FileMode) string {
-  /*
-  A numeric mode is from one to four octal digits (0-7), derived by adding up the bits with values 4, 2, and 1. Omitted digits are assumed to be leading zeros. The first digit selects the set user ID (4) and set group ID (2) and restricted deletion or sticky (1) attributes. The second digit selects permissions for the user who owns the file: read (4), write (2), and execute (1); the third selects permissions for other users in the file's group, with the same values; and the fourth for other users not in the file's group, with the same values.
-  */
+	/*
+	  A numeric mode is from one to four octal digits (0-7), derived by adding up the bits with values 4, 2, and 1. Omitted digits are assumed to be leading zeros. The first digit selects the set user ID (4) and set group ID (2) and restricted deletion or sticky (1) attributes. The second digit selects permissions for the user who owns the file: read (4), write (2), and execute (1); the third selects permissions for other users in the file's group, with the same values; and the fourth for other users not in the file's group, with the same values.
+	*/
 
-  pos1 := 0
-  if stat & os.ModeSetuid == os.ModeSetuid {
-    pos1 += 4
-  }
-  if stat & os.ModeSetgid == os.ModeSetgid {
-    pos1 += 2
-  }
-  if stat & os.ModeSticky == os.ModeSticky {
-    pos1 += 1
-  }
+	pos1 := 0
+	if stat&os.ModeSetuid == os.ModeSetuid {
+		pos1 += 4
+	}
+	if stat&os.ModeSetgid == os.ModeSetgid {
+		pos1 += 2
+	}
+	if stat&os.ModeSticky == os.ModeSticky {
+		pos1 += 1
+	}
 
-  return fmt.Sprintf("0%d%03o", pos1, stat.Perm())
+	return fmt.Sprintf("0%d%03o", pos1, stat.Perm())
 }
 
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
@@ -578,10 +564,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		c.SetVerbosity(lxc.Verbose)
 	}
 
-	if err := configureLogging(ctx, c); err != nil {
-		return errors.Wrap(err, "failed to configure logging")
-	}
-
 	if err := c.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
 		return errors.Wrapf(err, "failed to set rootfs: '%s'", spec.Root.Path)
 	}
@@ -594,7 +576,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
 	}
-	err = RunCommand("mkdir", "-p", "-m", "0750", lxcPathDir(c.Name(), CFG_DIR))
+	err = RunCommand("mkdir", "-p", "-m", "0750", clxc.RuntimePath(CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
 	}
@@ -602,14 +584,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	mounts := spec.Mounts
 
 	mounts = append(mounts, specs.Mount{
-		Source:      lxcPathDir(c.Name(), CFG_DIR),
+		Source:      clxc.RuntimePath(CFG_DIR),
 		Destination: strings.Trim(CFG_DIR, "/"),
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
 
 	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(lxcPathDir(c.Name(), SYNC_FIFO_PATH)); err != nil {
+	if err := makeSyncFifo(clxc.RuntimePath(SYNC_FIFO_PATH)); err != nil {
 		return errors.Wrapf(err, "failed to make sync fifo")
 	}
 
@@ -770,11 +752,6 @@ func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error
 	// Do not edit config after this.
 	if err := c.SaveConfigFile(configFilePath); err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", configFilePath)
-	}
-
-	// copy config file for debugging purposes
-	if logFilePath != "" {
-		exec.Command("cp", configFilePath, logFilePath+".config").Run()
 	}
 	return nil
 

@@ -2,14 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 
 	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"golang.org/x/sys/unix"
 
@@ -22,17 +21,17 @@ var execCmd = cli.Command{
 	ArgsUsage: "<containerID>",
 	Action:    doExec,
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "process, p",
 			Usage: "path to process json",
 			Value: "",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "pid-file",
 			Usage: "file to write the process id to",
 			Value: "",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "detach, d",
 			Usage: "detach from the executed process",
 		},
@@ -43,19 +42,11 @@ var execCmd = cli.Command{
 const EXEC_NAMESPACES = unix.CLONE_NEWIPC | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET | unix.CLONE_NEWCGROUP | unix.CLONE_NEWPID
 
 func doExec(ctx *cli.Context) error {
-	containerID := ctx.Args().First()
-	if len(containerID) == 0 {
-		return fmt.Errorf("missing container ID")
-		cli.ShowCommandHelpAndExit(ctx, "exec", 1)
-	}
-
-	log.Debugf("exec in container %s", containerID)
-
-	c, err := lxc.NewContainer(containerID, LXC_PATH)
+	err := clxc.LoadContainer()
 	if err != nil {
-		return errors.Wrap(err, "failed to create new container")
+		return errors.Wrap(err, "failed to load container")
 	}
-	defer c.Release()
+	c := clxc.Container
 
 	attachOpts := lxc.AttachOptions{
 		Namespaces: EXEC_NAMESPACES,
@@ -83,8 +74,8 @@ func doExec(ctx *cli.Context) error {
 		attachOpts.Env = procSpec.Env
 	} else {
 		// fall back to cmdline arguments
-		if len(ctx.Args()) >= 2 {
-			procArgs = ctx.Args()[1:]
+		if ctx.Args().Len() >= 2 {
+			procArgs = ctx.Args().Slice()[1:]
 		}
 	}
 

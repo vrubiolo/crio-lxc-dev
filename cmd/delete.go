@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
-	"github.com/apex/log"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
@@ -22,7 +20,7 @@ var deleteCmd = cli.Command{
 <containerID> is the ID of the container to delete
 `,
 	Flags: []cli.Flag{
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "force",
 			Usage: "force deletion",
 		},
@@ -30,64 +28,34 @@ var deleteCmd = cli.Command{
 }
 
 func doDelete(ctx *cli.Context) error {
-	containerID := ctx.Args().Get(0)
-	if len(containerID) == 0 {
-		fmt.Fprintf(os.Stderr, "missing container ID\n")
-		cli.ShowCommandHelpAndExit(ctx, "state", 1)
-	}
-
-	exists, err := containerExists(containerID)
+	err := clxc.LoadContainer()
 	if err != nil {
-		return errors.Wrap(err, "failed to check if container exists")
+		return err
 	}
-	if !exists {
-		log.Warnf("container '%s' not found", containerID)
-		return nil
-	}
+	c := clxc.Container
 
-	c, err := lxc.NewContainer(containerID, LXC_PATH)
-	if err != nil {
-		return errors.Wrap(err, "failed to load container")
-	}
-	defer c.Release()
-
-	if err := configureLogging(ctx, c); err != nil {
-		return errors.Wrap(err, "failed to configure logging")
-	}
-
-	// copy CFG_DIR ?
-	if wait := ctx.Duration("delete-wait"); wait != 0 {
-		log.Warnf("waiting '%s' seconds before deleting container")
-		time.Sleep(wait)
-	}
-
+	hasErrors := c.ErrorNum() != 0
 	state := c.State()
 	if state != lxc.STOPPED {
 		if !ctx.Bool("force") {
-			return fmt.Errorf("container %s must be stopped before delete - current state is %s", containerID, state)
+			return fmt.Errorf("container must be stopped before delete (current state is %s)", state)
 		}
 
 		if err := c.Stop(); err != nil {
-			log.Warnf("failed to stop container %s: %v", containerID, err)
+			return errors.Wrap(err, "failed to stop container")
 		}
 	}
-
-	// TODO: lxc-destroy deletes the rootfs.
-	// this appears to contradict the runtime spec:
-
-	// "Note that resources associated with the container,
-	// but not created by this container, MUST NOT be deleted."
-
 	if err := c.Destroy(); err != nil {
 		return errors.Wrap(err, "failed to delete container.")
 	}
 
+	if hasErrors && clxc.BackupOnError {
+		return os.Rename(clxc.RuntimePath(), filepath.Join(clxc.BackupDir, clxc.ContainerID))
+	}
+	// "Note that resources associated with the container,
+	// but not created by this container, MUST NOT be deleted."
+
 	// TODO - because we set rootfs.managed=0, Destroy() doesn't
 	// delete the /var/lib/lxc/$containerID/config file:
-	configDir := filepath.Join(LXC_PATH, containerID)
-	if err := os.RemoveAll(configDir); err != nil {
-		return errors.Wrapf(err, "failed to remove %s", configDir)
-	}
-
-	return nil
+	return os.RemoveAll(clxc.RuntimePath())
 }

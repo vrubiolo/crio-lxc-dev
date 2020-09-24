@@ -6,7 +6,7 @@ import (
 
 	"github.com/apex/log"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"time"
 )
 
@@ -19,7 +19,7 @@ var startCmd = cli.Command{
 starts <containerID>
 `,
 	Flags: []cli.Flag{
-		cli.DurationFlag{
+		&cli.DurationFlag{
 			Name:  "syncfifo-timeout",
 			Usage: "timeout for reading from syncfifo ",
 			Value: time.Second * 5,
@@ -28,12 +28,7 @@ starts <containerID>
 }
 
 func doStart(ctx *cli.Context) error {
-	containerID := ctx.Args().Get(0)
-	if len(containerID) == 0 {
-		fmt.Fprintf(os.Stderr, "missing container ID\n")
-		cli.ShowCommandHelpAndExit(ctx, "state", 1)
-	}
-	fifoPath := lxcPathDir(containerID, SYNC_FIFO_PATH)
+	fifoPath := clxc.RuntimePath(SYNC_FIFO_PATH)
 	log.Infof("opening fifo '%s'", fifoPath)
 	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	if err != nil {

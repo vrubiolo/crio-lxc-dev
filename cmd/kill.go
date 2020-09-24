@@ -12,9 +12,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/apex/log"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
@@ -97,7 +96,7 @@ func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	if err != nil {
 		// This may fail if either the proc filesystem is not mounted, or
 		// the process has died
-		log.Warnf("failed to open /proc/%d : %s", err)
+		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", err)
 	}
 	// double check that the init process still exists, and the proc
 	// directory actually belongs to the init process.
@@ -117,9 +116,8 @@ func killContainer(c *lxc.Container, signum unix.Signal) error {
 	if proc != nil {
 		defer proc.Close()
 	}
-	log.Debugf("kill pid:%d signum:%d(%s)", pid, signum, signum)
 	if err := unix.Kill(pid, signum); err != nil {
-		return errors.Wrapf(err, "failed to send signal")
+		return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
 	}
 	return nil
 }
@@ -150,30 +148,13 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 }
 
 func doKill(ctx *cli.Context) error {
-	containerID := ctx.Args().Get(0)
-	if len(containerID) == 0 {
-		return errors.New("missing container ID")
-	}
-	exists, err := containerExists(containerID)
+	err := clxc.LoadContainer()
 	if err != nil {
-		return errors.Wrap(err, "failed to check if container exists")
-	}
-	if !exists {
-		return fmt.Errorf("container '%s' not found", containerID)
+		return errors.Wrap(err, "failed to load contaienr")
 	}
 
-	c, err := lxc.NewContainer(containerID, LXC_PATH)
-	if err != nil {
-		return errors.Wrap(err, "failed to load container")
-	}
-	defer c.Release()
-
-	if err := configureLogging(ctx, c); err != nil {
-		return errors.Wrap(err, "failed to configure logging")
-	}
-
-	if !c.Running() {
-		return fmt.Errorf("container '%s' is not running", containerID)
+	if !clxc.Container.Running() {
+		return fmt.Errorf("container is not running")
 	}
 
 	signum, err := getSignal(ctx)
@@ -184,7 +165,7 @@ func doKill(ctx *cli.Context) error {
 	/*
 		r, err := LinuxRelease()
 		if err != nil {
-			log.Errorf("failed to detect linux release: %s", err)
+			fmt.Fprintf(os.Stderr, "failed to detect linux release: %s", err)
 		}
 
 		if err == nil && r.GreaterEqual(5, 8, 0) {
@@ -193,11 +174,13 @@ func doKill(ctx *cli.Context) error {
 				return err
 			}
 			defer pidfd.Close()
-			log.Debugf("pidfd_send_signal pidfd:%d signum:%d(%s)", pidfd, signum, signum)
-			return PidfdSendSignal(pidfd.Fd(), signum)
+			err := PidfdSendSignal(pidfd.Fd(), signum)
+			if err != nil {
+			  return errors.Wrapf((err, "pidfd_send_signal failed pidfd:%d signum:%d(%s)", pidfd, signum, signum)
+			}
 		} else {
 	*/
-	return killContainer(c, signum)
+	return killContainer(clxc.Container, signum)
 	//}
 	return nil
 }
