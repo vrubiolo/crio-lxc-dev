@@ -90,7 +90,6 @@ func doState(ctx *cli.Context) error {
 func getContainerInitState(c *lxc.Container) (int, string) {
 	pid, proc, err := safeGetInitPid(c)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to get the init pid state %s", err)
 		return -1, stateStopped
 	}
 	if proc != nil {

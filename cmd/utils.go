@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -71,7 +70,7 @@ func RunCommand(args ...string) error {
 }
 
 func resolvePathRelative(rootfs string, currentPath string, subPath string) (string, error) {
-	log.Debugf("resolvePathRelative(currentPath:%s subPath:%s)", currentPath, subPath)
+	log.Trace().Str("current:", currentPath).Str("sub:", subPath).Msg("resolve path relative")
 	p := filepath.Join(currentPath, subPath)
 
 	stat, err := os.Lstat(p)
@@ -81,7 +80,7 @@ func resolvePathRelative(rootfs string, currentPath string, subPath string) (str
 	}
 
 	if stat.Mode()&os.ModeSymlink == 0 {
-		log.Debugf("%s is not a symlink", p)
+		log.Trace().Str("filepath:", p).Msg("is not a symlink")
 		return p, nil
 	}
 	// resolve symlink
@@ -91,7 +90,7 @@ func resolvePathRelative(rootfs string, currentPath string, subPath string) (str
 		return p, err
 	}
 
-	log.Debugf("%s -> %s", p, linkDst)
+	log.Trace().Str("link:", p).Str("dst:", linkDst).Msg("symlink detected")
 
 	// The destination of an absolute link must be prefixed with the rootfs
 	if filepath.IsAbs(linkDst) {
@@ -125,7 +124,6 @@ func resolvePathRelative(rootfs string, currentPath string, subPath string) (str
 // source /var/run/containers/storage/overlay-containers/51230afad17aa3b42901f6d9efcba406511821b7e18b2223a6b4c43f9327ce97/userdata/resolv.conf
 // destination /etc/resolv.conf
 func resolveMountDestination(rootfs string, dst string) (dstPath string, err error) {
-	log.Debugf("resolveMountDestination(rootfs:%s dst:%s)", rootfs, dst)
 	// get path entries
 	entries := strings.Split(strings.TrimPrefix(dst, "/"), "/")
 
@@ -133,7 +131,7 @@ func resolveMountDestination(rootfs string, dst string) (dstPath string, err err
 	// start path resolution at rootfs
 	for i, entry := range entries {
 		currentPath, err = resolvePathRelative(rootfs, currentPath, entry)
-		log.Debugf("resolved %s : %s", currentPath, err)
+	  log.Trace().Err(err).Str("dst:", currentPath).Msg("path resolved")
 		if err != nil {
 			// The already resolved path is concatenated with the remaining path,
 			// if resolution of path fails at some point.

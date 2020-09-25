@@ -2,17 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/apex/log"
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
 	"runtime"
 
+  "github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
 )
 
+var log zerolog.Logger
+
 type CrioLXC struct {
 	*lxc.Container
+
+  Command string
 
 	RuntimeRoot    string
 	ContainerID    string
@@ -31,6 +35,7 @@ func (c CrioLXC) VersionString() string {
 	return fmt.Sprintf("%s (%s) (lxc:%s)", version, runtime.Version(), lxc.Version())
 }
 
+var ErrExist = errors.New("container already exists")
 var ErrNotExist = errors.New("container does not exist")
 
 // RuntimePath builds an absolute filepath which is relative to the containers runtime root.
@@ -69,10 +74,17 @@ func (c *CrioLXC) LoadContainer() error {
 		return errors.Wrap(err, "failed to load container")
 	}
 	c.Container = container
-	return clxc.configureLogging()
+	return nil
 }
 
 func (c *CrioLXC) CreateContainer() error {
+	configExists, err := pathExists(c.RuntimePath("config"))
+	if err != nil {
+		return errors.Wrap(err, "failed to check path existence of config")
+	}
+	if configExists {
+		return ErrExist
+	}
 	container, err := lxc.NewContainer(c.ContainerID, c.RuntimeRoot)
 	if err != nil {
 		return err
@@ -81,13 +93,13 @@ func (c *CrioLXC) CreateContainer() error {
 	if err := os.MkdirAll(c.RuntimePath(), 0770); err != nil {
 		return errors.Wrap(err, "failed to create container dir")
 	}
-	return clxc.configureLogging()
+	return nil
 }
 
 // Release releases/closes allocated resources (lxc.Container, LogFile)
 func (c CrioLXC) Release() {
 	if c.Container != nil {
-		c.Release()
+		c.Container.Release()
 	}
 	if c.LogFile != nil {
 		c.LogFile.Close()
@@ -100,25 +112,41 @@ func (c *CrioLXC) configureLogging() error {
 	if c.LogFilePath == "" {
 		c.LogFilePath = c.RuntimePath("crio-lxc.log")
 	}
+
 	f, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
 	if err != nil {
 		return errors.Wrapf(err, "failed to open log file %s", c.LogFilePath)
 	}
 	c.LogFile = f
+  log = zerolog.New(f).With().Str("cmd:", c.Command).Str("cid:",c.ContainerID).Logger()
 
 	level, err := parseLogLevel(c.LogLevelString)
 	if err != nil {
-		log.Errorf("Using fallback log-level %q: %s", level, err)
+		log.Error().Err(err).Stringer("loglevel:", level).Msg("using fallback log-level")
 	}
+	c.LogLevel = level
+
 	switch level {
-	case lxc.TRACE, lxc.DEBUG:
-		log.SetLevel(log.DebugLevel)
+	case lxc.TRACE:
+	  zerolog.SetGlobalLevel(zerolog.TraceLevel)
+  case lxc.DEBUG:
+	  zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	case lxc.INFO:
-		log.SetLevel(log.InfoLevel)
+	  zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	case lxc.WARN:
-		log.SetLevel(log.WarnLevel)
+	  zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	case lxc.ERROR:
-		log.SetLevel(log.ErrorLevel)
+	  zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 	}
 	return nil
+}
+
+func (c *CrioLXC) SetConfigItem(key, value string) error {
+  err := c.Container.SetConfigItem(key, value)
+  if err != nil {
+    log.Error().Err(err).Str("key:", key).Str("value:", value).Msg("lxc config")
+  } else {
+    log.Debug().Str("key:", key).Str("value:", value).Msg("lxc config")
+  }
+  return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
 }

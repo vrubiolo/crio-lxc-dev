@@ -5,6 +5,7 @@ require (
 	github.com/creack/pty v1.1.11
 	github.com/opencontainers/runtime-spec v1.0.2
 	github.com/pkg/errors v0.9.1
+	github.com/rs/zerolog v1.20.0
 	github.com/stretchr/testify v1.6.1
 	github.com/u-root/u-root v6.0.0+incompatible
 	github.com/urfave/cli v1.22.4

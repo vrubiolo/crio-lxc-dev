@@ -1,13 +1,15 @@
 package main
 
 import (
-	"github.com/apex/log"
 	"github.com/pkg/errors"
 	"os"
 
 	"github.com/urfave/cli/v2"
 )
 
+const (
+	CURRENT_OCI_VERSION = "0.2.1"
+)
 var version string
 var clxc CrioLXC
 
@@ -63,7 +65,7 @@ func main() {
 			Destination: &clxc.RuntimeRoot,
 		},
 		&cli.BoolFlag{
-			Name:        "systemd-group",
+			Name:        "systemd-cgroup",
 			Usage:       "enable systemd cgroup",
 			Destination: &clxc.SystemdCgroup,
 		},
@@ -84,20 +86,35 @@ func main() {
 	}
 
 	app.Before = func(ctx *cli.Context) error {
-	  // The container ID is the first param of any sub command
-		containerID := ctx.Args().Get(1)
+	  clxc.Command = ctx.Args().Get(0)
+	  return nil
+	}
+
+	setupCmd := func(ctx *cli.Context) error {
+		containerID := ctx.Args().Get(0)
 		if len(containerID) == 0 {
 			return errors.New("missing container ID")
 		}
 		clxc.ContainerID = containerID
+	  clxc.Command = ctx.Command.Name
+
+	  if err := clxc.configureLogging(); err != nil {
+	    return err
+	  }
+
+		log.Info().Strs("args", os.Args).Msg("run cmd")
 		return nil
 	}
+	for _, cmd := range app.Commands {
+	  cmd.Before = setupCmd
+	}
 
-	if err := app.Run(os.Args); err != nil {
-		//log.Debugf("cmdline: %s", os.Args)
-		log.Errorf("%+v", err)
+	err := app.Run(os.Args)
+	log.Info().Err(err).Msg("done")
+	clxc.Release()
+	if err != nil {
+	  // write diagnostics message to stderr for crio/kubelet
 		println(err.Error())
-		clxc.Release()
 		os.Exit(1)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/apex/log"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"time"
@@ -29,8 +28,8 @@ starts <containerID>
 
 func doStart(ctx *cli.Context) error {
 	fifoPath := clxc.RuntimePath(SYNC_FIFO_PATH)
-	log.Infof("opening fifo '%s'", fifoPath)
 	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+	log.Debug().Err(err).Str("fifo", fifoPath).Msg("open fifo")
 	if err != nil {
 		return errors.Wrap(err, "container not started - failed to open sync fifo")
 	}

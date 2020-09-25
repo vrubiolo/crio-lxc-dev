@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/apex/log"
 	"github.com/creack/pty"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
@@ -45,6 +44,7 @@ var createCmd = cli.Command{
 		&cli.DurationFlag{
 			Name:  "timeout",
 			Usage: "timeout for container creation",
+			EnvVars: []string{"CRIO_LXC_CREATE_TIMEOUT"},
 			Value: time.Second * 5,
 		},
 	},
@@ -123,7 +123,7 @@ func getUserHome(spec *specs.Spec) string {
 // for `exec` to process them properly.
 func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
-	if err := c.SetConfigItem("lxc.environment", envStateCreated); err != nil {
+	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
 
@@ -172,7 +172,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	}
 
 	cmdFile := clxc.RuntimePath(INIT_CMD)
-	log.Debugf("Writing lxc.init.cmd file to %s", cmdFile)
+	log.Debug().Str("filepath:", cmdFile).Msg("writing init file")
 	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0500)
 	if err != nil {
 		return err
@@ -182,7 +182,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if err != nil {
 		return errors.Wrapf(err, "missing 'exec' permissions for %s (filesystem mounted with 'noexec' ?)", cmdFile)
 	}
-	return c.SetConfigItem("lxc.init.cmd", INIT_CMD)
+	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
 
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -213,16 +213,16 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 				return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
 			}
 
-			if err := c.SetConfigItem(configKey, configVal); err != nil {
-				return errors.Wrapf(err, "failed to set namespace config: '%s'='%s'", configKey, configVal)
+			if err := clxc.SetConfigItem(configKey, configVal); err != nil {
+			  return err
 			}
 		}
 	}
 
 	if len(nsToClone) > 0 {
 		configVal = strings.Join(nsToClone, " ")
-		if err := c.SetConfigItem("lxc.namespace.clone", configVal); err != nil {
-			return errors.Wrapf(err, "failed to set lxc.namespace.clone=%s", configVal)
+		if err := clxc.SetConfigItem("lxc.namespace.clone", configVal); err != nil {
+		  return err
 		}
 	}
 	return nil
@@ -244,8 +244,8 @@ func doCreate(ctx *cli.Context) error {
 	}
 	c := clxc.Container
 
-	if err := c.SetConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
-		return errors.Wrapf(err, "failed to lxc.log.file: '%s'", clxc.LogFilePath)
+	if err := clxc.SetConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
+	  return err
 	}
 
 	err = c.SetLogLevel(clxc.LogLevel)
@@ -282,49 +282,49 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	if aaprofile == "" {
 		aaprofile = "unconfined"
 	}
-	if err := c.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
-		return errors.Wrapf(err, "failed to set apparmor.profile to %s", aaprofile)
+	if err := clxc.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
+	  return err
 	}
 
 	if spec.Process.OOMScoreAdj != nil {
-		if err := c.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
-			return errors.Wrap(err, "failed to set lxc.proc.oom_score_adj")
+		if err := clxc.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
+		  return err
 		}
 	}
 
 	if spec.Process.NoNewPrivileges {
-		if err := c.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
-			return errors.Wrapf(err, "failed to set lxc.no_new_privs")
+		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+		  return err
 		}
 	}
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
 	// the container runtime MUST NOT be deleted by the container runtime.
-	if err := c.SetConfigItem("lxc.ephemeral", "0"); err != nil {
-		return errors.Wrapf(err, "failed to set lxc.ephemeral=0")
+	if err := clxc.SetConfigItem("lxc.ephemeral", "0"); err != nil {
+	  return err
 	}
 
 	if err := configureCapabilities(ctx, c, spec); err != nil {
 		return errors.Wrapf(err, "failed to configure capabilities")
 	}
 
-	if err := c.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
-		return errors.Wrapf(err, "failed to set lxc.init.uid")
+	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
+	  return err
 	}
-	if err := c.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
-		return errors.Wrapf(err, "failed to set lxc.init.uid")
+	if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
+	  return err
 	}
 
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
-		if err := c.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-			return errors.Wrapf(err, "failed to set lxc.idmap")
+		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+		  return err
 		}
 	}
 
 	for _, m := range spec.Linux.GIDMappings {
-		if err := c.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-			return errors.Wrapf(err, "failed to set lxc.idmap")
+		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+		  return err
 		}
 	}
 
@@ -348,9 +348,9 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 		keepCaps = strings.Join(caps, " ")
 	}
 
-	log.Debugf("Keeping capabilities: %s", keepCaps)
-	if err := c.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
-		return errors.Wrapf(err, "failed to set lxc.cap.keep")
+	log.Debug().Str("caps:", keepCaps).Msg("keeping capabilities")
+	if err := clxc.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
+	  return err
 	}
 	return nil
 }
@@ -371,20 +371,26 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	linux := spec.Linux
 
 	if ctx.Bool("systemd-cgroup") {
-		c.SetConfigItem("lxc.cgroup.root", "system.slice")
+	  if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
+	    return err
+	  }
 	}
 
 	if linux.CgroupsPath != "" {
-		c.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath)
+		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
+		  return err
+		}
 	}
 
-	c.SetConfigItem("lxc.cgroup.relative", "1")
+	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
+	  return err
+	}
 
 	// autodev is required ?
-	c.SetConfigItem("lxc.autodev", "0") // TODO  create /dev/null ?
-	// if autodev is disable lxc spits out these warnings:
-	// WARN utils - utils.c:fix_stdio_permissions:1874 - No such file or directory - Failed to open "/dev/null"
-	// WARN start - start.c:do_start:1371 - Failed to ajust stdio permissions
+	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
+	  return err
+	}
+
 	if len(spec.Linux.Devices) > 0 {
 		if err := addHookCreateDevices(ctx, c, spec); err != nil {
 			return errors.Wrapf(err, "failed to add create devices hook")
@@ -415,60 +421,62 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 			min = fmt.Sprintf("%d", *dev.Minor)
 		}
 		val := fmt.Sprintf("%s %s:%s %s", devType, maj, min, dev.Access)
-		if err := c.SetConfigItem(key, val); err != nil {
-			return errors.Wrapf(err, "failed to set %s", key)
+		if err := clxc.SetConfigItem(key, val); err != nil {
+		  return err
 		}
 	}
 
+  /* TODO should be configured in crio
 	// allow /dev/null
-	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw"); err != nil {
-		return errors.Wrapf(err, "failed to allow access to /dev/null")
+	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw"); err != nil {
+	  return err
 	}
 	// /dev/zero
-	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
-		return errors.Wrapf(err, "failed to allow access to /dev/zero")
+	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
+	  return err
 	}
 	// /dev/urandom
-	if err := c.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
-		return errors.Wrapf(err, "failed to allow access to /dev/urandom")
+	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
+	  return err
 	}
+	*/
 
 	// Memory restriction configuration
 	if mem := linux.Resources.Memory; mem != nil {
-		log.Debugf("TODO configure cgroup memory controller")
+		log.Debug().Msg("TODO configure cgroup memory controller")
 	}
 	// CPU resource restriction configuration
 	if cpu := linux.Resources.CPU; cpu != nil {
 		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
-		log.Debugf("configure cgroup cpu controller")
+		log.Debug().Msg("configure cgroup cpu controller")
 		if cpu.Shares != nil && *cpu.Shares > 0 {
-			if err := c.SetConfigItem("lxc.cgroup.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.shares")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+			  return err
 			}
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
-			if err := c.SetConfigItem("lxc.cgroup.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.cfs_quota_us")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
+			  return err
 			}
 		}
 		if cpu.Period != nil && *cpu.Period != 0 {
-			if err := c.SetConfigItem("lxc.cgroup.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.cfs_period_us")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+			  return err
 			}
 		}
 		if cpu.Cpus != "" {
-			if err := c.SetConfigItem("lxc.cgroup.cpuset.cpus", cpu.Cpus); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpuset.cpus")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpuset.cpus", cpu.Cpus); err != nil {
+			  return err
 			}
 		}
 		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
-			if err := c.SetConfigItem("lxc.cgroup.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.rt_period_us")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
+			  return err
 			}
 		}
 		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
-			if err := c.SetConfigItem("lxc.cgroup.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
-				return errors.Wrap(err, "failed to set lxc.cgroup.cpu.rt_runtime_us")
+			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
+			  return err
 			}
 		}
 		// Mems string `json:"mems,omitempty"`
@@ -476,21 +484,21 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	// Task resource restriction configuration.
 	if pids := linux.Resources.Pids; pids != nil {
-		if err := c.SetConfigItem("lxc.cgroup.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
-			return errors.Wrap(err, "failed to set lxc.cgroup.pids.max")
+		if err := clxc.SetConfigItem("lxc.cgroup.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
+		  return err
 		}
 	}
 	// BlockIO restriction configuration
 	if blockio := linux.Resources.BlockIO; blockio != nil {
-		log.Debugf("TODO configure cgroup blockio controller")
+		log.Debug().Msg("TODO configure cgroup blockio controller")
 	}
 	// Hugetlb limit (in bytes)
 	if hugetlb := linux.Resources.HugepageLimits; hugetlb != nil {
-		log.Debugf("TODO configure cgroup hugetlb controller")
+		log.Debug().Msg("TODO configure cgroup hugetlb controller")
 	}
 	// Network restriction configuration
 	if net := linux.Resources.Network; net != nil {
-		log.Debugf("TODO configure cgroup network controllers")
+		log.Debug().Msg("TODO configure cgroup network controllers")
 	}
 	return nil
 }
@@ -528,7 +536,7 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 		//fmt.Fprintf(f, "fi\n")
 	}
 	//fmt.Fprintf(f, "sleep 1\n")
-	return c.SetConfigItem("lxc.hook.mount", hookPath)
+	return clxc.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
 func accessMask(stat os.FileMode) string {
@@ -564,12 +572,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		c.SetVerbosity(lxc.Verbose)
 	}
 
-	if err := c.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
-		return errors.Wrapf(err, "failed to set rootfs: '%s'", spec.Root.Path)
+	if err := clxc.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
+	  return err
 	}
 
-	if err := c.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
-		return errors.Wrap(err, "failed to set rootfs.managed to 0")
+	if err := clxc.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
+	  return err
 	}
 
 	err := RunCommand("mkdir", "-p", "-m", "0750", filepath.Join(spec.Root.Path, CFG_DIR))
@@ -601,8 +609,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		// Bug in lxc ? (rootfs should be mounted readonly after all mounts destination directories have been created ?)
 		// https://github.com/lxc/lxc/issues/1702
 	}
-	if err := c.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
-		return errors.Wrap(err, "failed to set lxc.rootfs.options")
+	if err := clxc.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
+	  return err
+	}
+
+	if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
+	  log.Debug().Msg("cgroup namespace is not enabled")
 	}
 
 	for _, ms := range mounts {
@@ -622,11 +634,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		mountDest, err := resolveMountDestination(spec.Root.Path, ms.Destination)
 		// Intermediate path resolution failed. This is not an error, since
 		// the remaining directories / files are automatically created (create=dir|file)
-		if err != nil {
-			log.Debugf("resolveMountDestination: %s --> %s (err:%s)", ms.Destination, mountDest, err)
-		} else {
-			log.Debugf("resolveMountDestination: %s --> %s)", ms.Destination, mountDest)
-		}
+		log.Trace().Err(err).Str("dst:", ms.Destination).Str("effective:", mountDest).Msg("resolve mount destination")
 
 		// Check whether the resolved destination of the target link escapes the rootfs.
 		if !filepath.HasPrefix(mountDest, spec.Root.Path) {
@@ -646,11 +654,10 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 		opts := strings.Join(ms.Options, ",")
 		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, opts)
-		log.Debugf("adding mount entry %q", mnt)
 
-		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-			return errors.Wrap(err, "failed to set mount config")
-		}
+    if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+      return err
+    }
 	}
 
 	rootmnt := spec.Root.Path
@@ -667,16 +674,16 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 		// will fail if target is a directory, maybe use apparmor instead ?
 		mnt := fmt.Sprintf("%s %s %s %s", "/dev/null", strings.TrimLeft(p, "/"), "none", "bind,optional")
-		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-			return errors.Wrapf(err, "failed to mask path %s", p)
+		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+			return errors.Wrap(err, "failed to mask path")
 		}
 	}
 	// lxc handles read-only remount automatically, so no need for an additional remount entry
 	for _, p := range spec.Linux.ReadonlyPaths {
 		src := filepath.Join(rootmnt, p)
 		mnt := fmt.Sprintf("%s %s %s %s", src, strings.TrimLeft(p, "/"), "none", "bind,ro,optional")
-		if err := c.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-			return errors.Wrapf(err, "failed to mount %s readonly", p)
+		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+			return errors.Wrap(err, "failed to make path readonly")
 		}
 	}
 
@@ -688,12 +695,13 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrap(err, "failed to set lxc.init.cmd")
 	}
 
-	if err := c.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
-		return errors.Wrap(err, "failed to set hostname")
+	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
+	  return err
 	}
 
-	if err := c.SetConfigItem("lxc.hook.version", "1"); err != nil {
-		return errors.Wrap(err, "failed to set hook version")
+  // pass context information as environment variables to hook scripts
+	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
+	  return err
 	}
 
 	if err := configureNamespaces(c, spec); err != nil {
@@ -718,39 +726,44 @@ func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 		if err != nil {
 			return errors.Wrapf(err, "source %s for bind mount does not exist", ms.Source)
 		}
+
 		if !info.IsDir() {
-			log.Debugf("creating mount target file %s", ms.Destination)
 			ms.Options = append(ms.Options, "create=file")
 			// source exists and is not a directory
 			// create a target file that can be used as target for a bind mount
 			err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
+			log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create parent directory for file bind mount")
 			if err != nil {
 				return errors.Wrap(err, "failed to create mount destination dir")
 			}
 			f, err := os.OpenFile(ms.Destination, os.O_CREATE, 0440)
+			log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create file bind mount destination")
 			if err != nil {
-				return errors.Wrap(err, "failed to create mount destination file")
+				return errors.Wrap(err, "failed to create file mountpoint")
 			}
 			return f.Close()
 		}
 	}
 
 	ms.Options = append(ms.Options, "create=dir")
-	log.Debugf("creating mount target destination %s", ms.Destination)
-	if filepath.Base(ms.Destination) != filepath.Join(spec.Root.Path, "/dev") {
+	// FIXME exclude all directories that are below other mounts
+	// only directories / files on the readonly rootfs must be created
+	//if filepath.Base(ms.Destination) != filepath.Join(spec.Root.Path, "/dev") {
 		err := os.MkdirAll(ms.Destination, 0755)
+	  log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
 		if err != nil {
 			return errors.Wrap(err, "failed to create mount destination")
 		}
-	}
+	//}
 	return nil
 }
 
 func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error {
-	log.Debugf("Saving config file %s", configFilePath)
 	// Write out final config file for debugging and use with lxc-attach:
 	// Do not edit config after this.
-	if err := c.SaveConfigFile(configFilePath); err != nil {
+	err := c.SaveConfigFile(configFilePath)
+	log.Debug().Err(err).Str("config", configFilePath).Msg("save config file")
+  if err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", configFilePath)
 	}
 	return nil
@@ -806,10 +819,8 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 }
 
 func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
-	configFilePath := filepath.Join(LXC_PATH, c.Name(), "config")
-	runtime := ctx.String("runtime")
-	cmd := exec.Command(runtime, c.Name(), LXC_PATH, configFilePath)
-	log.Debugf("Starting runtime: %s", cmd.Args)
+	configFilePath := clxc.RuntimePath("config")
+	cmd := exec.Command(clxc.StartCommand, c.Name(), clxc.RuntimePath(), configFilePath)
 
 	if consoleSocket := ctx.String("console-socket"); consoleSocket != "" {
 		if err := saveConfig(ctx, c, configFilePath); err != nil {
@@ -824,8 +835,8 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 			// Inherit stdio from calling process (conmon)
 			// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
 			// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
-			if err := c.SetConfigItem("lxc.console.path", "none"); err != nil {
-				return errors.Wrapf(err, "failed to disable PTY")
+			if err := clxc.SetConfigItem("lxc.console.path", "none"); err != nil {
+				return errors.Wrap(err, "failed to disable PTY")
 			}
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
@@ -848,7 +859,7 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 	}
 
 	if !waitContainerCreated(c, timeout) {
-		return fmt.Errorf("container creation timeout (%s) expired", timeout)
+		return fmt.Errorf("waiting for container timed out (%s)", timeout)
 	}
 	return nil
 }

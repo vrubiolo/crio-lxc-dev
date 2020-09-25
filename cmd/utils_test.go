@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/apex/log"
 	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"os"
@@ -11,10 +10,6 @@ import (
 	"strings"
 	"testing"
 )
-
-func init() {
-	log.SetLevel(log.DebugLevel)
-}
 
 func TestResolveMountDestinationAbsolute(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "golang.test")

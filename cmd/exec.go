@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/apex/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -54,15 +53,17 @@ func doExec(ctx *cli.Context) error {
 
 	var procArgs []string
 	specFilePath := ctx.String("process")
-	log.Debugf("reading process spec %s", specFilePath)
 
+	log.Debug().Str("spec:", specFilePath).Msg("read process spec")
 	specData, err := ioutil.ReadFile(specFilePath)
+  log.Trace().Err(err).RawJSON("spec", specData).Msg("process spec data")
+
 	if err == nil {
 		// prefer the process spec file
 		var procSpec *specs.Process
 		err := json.Unmarshal(specData, &procSpec)
 		if err != nil {
-			return errors.Wrapf(err, "failed to read process spec from %s: %s", specFilePath, err)
+			return errors.Wrapf(err, "failed to read process spec")
 		}
 		// tanslate process spec to lxc.AttachOptions
 		procArgs = procSpec.Args
@@ -79,27 +80,28 @@ func doExec(ctx *cli.Context) error {
 		}
 	}
 
-	log.Debugf("process setup completed %v: %#v", procArgs, attachOpts)
-
 	attachOpts.StdinFd = os.Stdin.Fd()
 	attachOpts.StdoutFd = os.Stdout.Fd()
 	attachOpts.StderrFd = os.Stderr.Fd()
 
-	if ctx.Bool("detach") {
+  detach := ctx.Bool("detach")
+  log.Debug().Bool("detach", detach).Strs("args", procArgs).Msg("exec cmd")
+
+	if detach {
 		pidFile := ctx.String("pid-file")
-		log.Debugf("detaching process")
 		pid, err := c.RunCommandNoWait(procArgs, attachOpts)
+		log.Debug().Err(err).Int("pid", pid).Msg("cmd executed detached")
 		if err != nil {
 			return errors.Wrapf(err, "c.RunCommandNoWait failed")
 		}
 		if pidFile == "" {
-			log.Debugf("detaching process but pid-file value is empty")
+			log.Warn().Msg("detaching process but pid-file value is empty")
 			return nil
 		}
 		return createPidFile(pidFile, pid)
 	} else {
-		log.Debugf("run command synchronous")
 		exitStatus, err := c.RunCommandStatus(procArgs, attachOpts)
+		log.Debug().Err(err).Int("exit", exitStatus).Msg("cmd executed synchronous")
 		if err != nil {
 			return errors.Wrapf(err, "Cmd returned with exit code %d", exitStatus)
 		}
