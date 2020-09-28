@@ -183,6 +183,11 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if err != nil {
 		return errors.Wrapf(err, "missing 'exec' permissions for %s (filesystem mounted with 'noexec' ?)", cmdFile)
 	}
+	// change permissions
+	err = unix.Chown(cmdFile, int(spec.Process.User.UID), int(spec.Process.User.GID))
+	if err != nil {
+	  return errors.Wrapf(err, "failed to set owner/group from spec.Process.User to %s", cmdFile)
+	}
 	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
 
