@@ -38,7 +38,7 @@ func main() {
 		&cli.StringFlag{
 			Name:        "log-file",
 			Usage:       "log file for LXC and crio-lxc (default is per container in lxc-path)",
-			EnvVars:     []string{"CRIO_LXC_LOG_FILE"},
+			EnvVars:     []string{"CRIO_LXC_LOG_FILE", "LOG_FILE"},
 			Destination: &clxc.LogFilePath,
 		},
 		// TODO this should be controlled by custom annotations / labels from within k8s
@@ -98,6 +98,8 @@ func main() {
 		clxc.ContainerID = containerID
 	  clxc.Command = ctx.Command.Name
 
+    // FIXME container directory is not yet created ...
+    // so log file can not be created
 	  if err := clxc.configureLogging(); err != nil {
 	    return err
 	  }

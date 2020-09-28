@@ -99,7 +99,7 @@ func getContainerInitState(c *lxc.Container) (int, string) {
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read init process environment %s: %s", envFile, err)
+		//fmt.Fprintf(os.Stderr, "failed to read init process environment %s: %s", envFile, err)
 		return -1, stateStopped
 	}
 

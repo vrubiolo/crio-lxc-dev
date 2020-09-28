@@ -257,12 +257,6 @@ func doCreate(ctx *cli.Context) error {
 	}
 
 	specPath := filepath.Join(ctx.String("bundle"), "config.json")
-	/*
-	  err =	RunCommand("cp", specPath, lxcPathDir("spec.json"))
-	  if err != nil {
-	    return errors.Wrap(err, "failed to copy bundle spec")
-	  }
-	*/
 	spec, err := readBundleSpec(specPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
@@ -348,7 +342,6 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 		keepCaps = strings.Join(caps, " ")
 	}
 
-	log.Debug().Str("caps:", keepCaps).Msg("keeping capabilities")
 	if err := clxc.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
 	  return err
 	}
@@ -362,19 +355,25 @@ func ensureDevNull(spec *specs.Spec) {
 		}
 	}
 	mode := os.ModePerm
-	var uid, gid uint32 = 0, 0
+	var uid, gid uint32 = spec.Process.User.UID, spec.Process.User.GID
 	devNull := specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3, FileMode: &mode, UID: &uid, GID: &gid}
 	spec.Linux.Devices = append(spec.Linux.Devices, devNull)
+
+  allowDevNull := specs.LinuxDeviceCgroup{Allow: true, Type: devNull.Type, Major: &devNull.Major, Minor: &devNull.Minor, Access:"rw"} 
+  spec.Linux.Resources.Devices  = append(spec.Linux.Resources.Devices, allowDevNull)
+	//return clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw")
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
+  /*
 	if ctx.Bool("systemd-cgroup") {
 	  if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
 	    return err
 	  }
 	}
+	*/
 
 	if linux.CgroupsPath != "" {
 		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
@@ -391,10 +390,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	  return err
 	}
 
-	if len(spec.Linux.Devices) > 0 {
-		if err := addHookCreateDevices(ctx, c, spec); err != nil {
+	if err := addHookCreateDevices(ctx, c, spec); err != nil {
 			return errors.Wrapf(err, "failed to add create devices hook")
-		}
 	}
 
 	// Set cgroup device permissions.
@@ -426,12 +423,14 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 	}
 
-  /* TODO should be configured in crio
+  // cri-o does not create /dev/null from the container config for privileged devices,
+  // https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
+  // but lxc does not start without /dev/null 
+  // ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
+
 	// allow /dev/null
-	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw"); err != nil {
-	  return err
-	}
 	// /dev/zero
+	/*
 	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
 	  return err
 	}
@@ -512,7 +511,7 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 	}
 	defer f.Close()
 
-	//ensureDevNull(spec)
+	ensureDevNull(spec)
 
 	fmt.Fprintln(f, "#!/bin/sh -x")
 	fmt.Fprintf(f, "cd $LXC_ROOTFS_MOUNT\n")
@@ -820,7 +819,12 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 
 func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
 	configFilePath := clxc.RuntimePath("config")
-	cmd := exec.Command(clxc.StartCommand, c.Name(), clxc.RuntimePath(), configFilePath)
+	cmd := exec.Command(clxc.StartCommand, c.Name(), clxc.RuntimeRoot, configFilePath)
+	// clear environment
+	// if environment is non-empty e.g /etc/crio/crio.conf specifies conmon_env (other than PATH)
+	// then lxc does not export lxc.environment variables ....
+	// so we can set the process environment here if we want
+	cmd.Env = []string{}
 
 	if consoleSocket := ctx.String("console-socket"); consoleSocket != "" {
 		if err := saveConfig(ctx, c, configFilePath); err != nil {
