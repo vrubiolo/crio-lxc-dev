@@ -32,6 +32,7 @@ var createCmd = cli.Command{
 			Name:  "bundle",
 			Usage: "set bundle directory",
 			Value: ".",
+			Destination: &clxc.BundlePath,
 		},
 		&cli.StringFlag{
 			Name:  "console-socket",
@@ -239,9 +240,15 @@ func doCreate(ctx *cli.Context) error {
 		}
 		err = RunCommand("cp", "-r", clxc.RuntimePath(), backupDir)
 		if err != nil {
-			log.Error().Err(err).Str("dir:", backupDir).Msg("failed to copy runtime directory to backup dir")
+			log.Error().Err(err).Str("dir:", backupDir).Msg("failed to copy lxc runtime directory to backup dir")
 			return createErr
 		}
+		err = RunCommand("cp", clxc.SpecPath, backupDir)
+		if err != nil {
+			log.Error().Err(err).Str("dir:", backupDir).Str("spec:", clxc.SpecPath).Msg("failed to copy runtime spec to backup dir")
+			return createErr
+		}
+
 		log.Error().Err(createErr).Str("dir:", backupDir).Msg("runtime directory copied to backup dir")
 	}
 	return createErr
@@ -275,8 +282,8 @@ func doCreateInternal(ctx *cli.Context) error {
 		c.SetVerbosity(lxc.Verbose)
 	}
 
-	specPath := filepath.Join(ctx.String("bundle"), "config.json")
-	spec, err := readBundleSpec(specPath)
+  clxc.SpecPath = filepath.Join(clxc.BundlePath, "config.json")
+	spec, err := readBundleSpec(clxc.SpecPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
 	}
@@ -386,13 +393,11 @@ func ensureDevNull(spec *specs.Spec) {
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
-	/*
-		if ctx.Bool("systemd-cgroup") {
-		  if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
-		    return err
-		  }
+	if ctx.Bool("systemd-cgroup") {
+		if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
+		  return err
 		}
-	*/
+	}
 
 	if linux.CgroupsPath != "" {
 		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
@@ -400,9 +405,11 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 	}
 
+  /*
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
 		return err
 	}
+	*/
 
 	// autodev is required ?
 	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
@@ -630,6 +637,10 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := clxc.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
 		return err
 	}
+	// disable auto-mounting ?
+	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
+		return err
+	}
 
 	if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
 		log.Debug().Msg("cgroup namespace is not enabled")
@@ -661,17 +672,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 		ms.Destination = mountDest
 
-		_, err = os.Stat(ms.Destination)
-		if os.IsNotExist(err) {
-			createMountDestination(spec, &ms)
-		} else {
-			if err != nil {
-				return errors.Wrapf(err, "mount destination %s unavailable", ms.Destination)
-			}
-		}
+		err = createMountDestination(spec, &ms)
+	  if err != nil {
+		  return errors.Wrapf(err, "failed to create mount destination %s", ms.Destination)
+	  }
 
-		opts := strings.Join(ms.Options, ",")
-		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, opts)
+		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, strings.Join(ms.Options, ","))
 
 		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 			return err
@@ -739,40 +745,36 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 // We add 'create=dir' or 'create=file' to mount options because the mount destination
 // may be shadowed by a previous mount. In this case lxc will create the mount destination.
 func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
-	if ms.Type == "bind" {
-		info, err := os.Stat(ms.Source)
-		if err != nil {
-			return errors.Wrapf(err, "source %s for bind mount does not exist", ms.Source)
-		}
-
-		if !info.IsDir() {
-			ms.Options = append(ms.Options, "create=file")
-			// source exists and is not a directory
-			// create a target file that can be used as target for a bind mount
-			err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
-			log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create parent directory for file bind mount")
-			if err != nil {
-				return errors.Wrap(err, "failed to create mount destination dir")
-			}
-			f, err := os.OpenFile(ms.Destination, os.O_CREATE, 0440)
-			log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create file bind mount destination")
-			if err != nil {
-				return errors.Wrap(err, "failed to create file mountpoint")
-			}
-			return f.Close()
-		}
+	info, err := os.Stat(ms.Source)
+	if err != nil && ms.Type == "bind" {
+	    // check if mountpoint is optional ?
+			return errors.Wrapf(err, "failed to access source %s for bind mount", ms.Source)
 	}
 
+	if err == nil && !info.IsDir() {
+		ms.Options = append(ms.Options, "create=file")
+		// source exists and is not a directory
+		// create a target file that can be used as target for a bind mount
+		err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
+		log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create parent directory for file bind mount")
+		if err != nil {
+			return errors.Wrap(err, "failed to create mount destination dir")
+		}
+		f, err := os.OpenFile(ms.Destination, os.O_CREATE, 0440)
+		log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create file bind mount destination")
+		if err != nil {
+			return errors.Wrap(err, "failed to create file mountpoint")
+		}
+		return f.Close()
+	}
 	ms.Options = append(ms.Options, "create=dir")
 	// FIXME exclude all directories that are below other mounts
 	// only directories / files on the readonly rootfs must be created
-	//if filepath.Base(ms.Destination) != filepath.Join(spec.Root.Path, "/dev") {
-	err := os.MkdirAll(ms.Destination, 0755)
+	err = os.MkdirAll(ms.Destination, 0755)
 	log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
 	if err != nil {
 		return errors.Wrap(err, "failed to create mount destination")
 	}
-	//}
 	return nil
 }
 

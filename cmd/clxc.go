@@ -29,6 +29,8 @@ type CrioLXC struct {
 	SystemdCgroup  bool
 	BusyboxBinary  string
 	StartCommand   string
+	BundlePath    string
+	SpecPath      string
 }
 
 func (c CrioLXC) VersionString() string {
