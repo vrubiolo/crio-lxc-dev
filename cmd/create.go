@@ -410,11 +410,9 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 	}
 
-  /*
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
 		return err
 	}
-	*/
 
 	// autodev is required ?
 	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
