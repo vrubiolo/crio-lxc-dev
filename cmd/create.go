@@ -304,9 +304,9 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	// Crio sets the apparmor profile from the container spec.
 	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
 	aaprofile := spec.Process.ApparmorProfile
-//	if aaprofile == "" {
+	if aaprofile == "" {
 		aaprofile = "unconfined"
-//	}
+	}
 	if err := clxc.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
 		return err
 	}
@@ -317,13 +317,13 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-  /*
+ 
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
 			return err
 		}
 	}
-	*/
+
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
 	// the container runtime MUST NOT be deleted by the container runtime.
