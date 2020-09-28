@@ -50,10 +50,10 @@ func doDelete(ctx *cli.Context) error {
 	}
 
 	if errnum != 0 && clxc.BackupOnError {
-	  backupDir := filepath.Join(clxc.BackupDir, clxc.ContainerID)
+		backupDir := filepath.Join(clxc.BackupDir, clxc.ContainerID)
 		err := os.Rename(clxc.RuntimePath(), backupDir)
-	  log.Error().Err(err).Str("backup:", backupDir).Int("state", c.ErrorNum()).Msg("move resources of failed container")
-	  return err
+		log.Error().Err(err).Str("backup:", backupDir).Int("state", c.ErrorNum()).Msg("move resources of failed container")
+		return err
 	}
 	// "Note that resources associated with the container,
 	// but not created by this container, MUST NOT be deleted."

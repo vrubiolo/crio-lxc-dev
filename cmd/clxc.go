@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-  "github.com/rs/zerolog"
+	"github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
 )
 
@@ -16,7 +16,7 @@ var log zerolog.Logger
 type CrioLXC struct {
 	*lxc.Container
 
-  Command string
+	Command string
 
 	RuntimeRoot    string
 	ContainerID    string
@@ -118,7 +118,7 @@ func (c *CrioLXC) configureLogging() error {
 		return errors.Wrapf(err, "failed to open log file %s", c.LogFilePath)
 	}
 	c.LogFile = f
-  log = zerolog.New(f).With().Str("cmd:", c.Command).Str("cid:",c.ContainerID).Logger()
+	log = zerolog.New(f).With().Str("cmd:", c.Command).Str("cid:", c.ContainerID).Logger()
 
 	level, err := parseLogLevel(c.LogLevelString)
 	if err != nil {
@@ -128,25 +128,25 @@ func (c *CrioLXC) configureLogging() error {
 
 	switch level {
 	case lxc.TRACE:
-	  zerolog.SetGlobalLevel(zerolog.TraceLevel)
-  case lxc.DEBUG:
-	  zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	case lxc.DEBUG:
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	case lxc.INFO:
-	  zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	case lxc.WARN:
-	  zerolog.SetGlobalLevel(zerolog.WarnLevel)
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	case lxc.ERROR:
-	  zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 	}
 	return nil
 }
 
 func (c *CrioLXC) SetConfigItem(key, value string) error {
-  err := c.Container.SetConfigItem(key, value)
-  if err != nil {
-    log.Error().Err(err).Str("key:", key).Str("value:", value).Msg("lxc config")
-  } else {
-    log.Debug().Str("key:", key).Str("value:", value).Msg("lxc config")
-  }
-  return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
+	err := c.Container.SetConfigItem(key, value)
+	if err != nil {
+		log.Error().Err(err).Str("key:", key).Str("value:", value).Msg("lxc config")
+	} else {
+		log.Debug().Str("key:", key).Str("value:", value).Msg("lxc config")
+	}
+	return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
 }

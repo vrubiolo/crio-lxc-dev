@@ -56,7 +56,7 @@ func doExec(ctx *cli.Context) error {
 
 	log.Debug().Str("spec:", specFilePath).Msg("read process spec")
 	specData, err := ioutil.ReadFile(specFilePath)
-  log.Trace().Err(err).RawJSON("spec", specData).Msg("process spec data")
+	log.Trace().Err(err).RawJSON("spec", specData).Msg("process spec data")
 
 	if err == nil {
 		// prefer the process spec file
@@ -84,8 +84,8 @@ func doExec(ctx *cli.Context) error {
 	attachOpts.StdoutFd = os.Stdout.Fd()
 	attachOpts.StderrFd = os.Stderr.Fd()
 
-  detach := ctx.Bool("detach")
-  log.Debug().Bool("detach", detach).Strs("args", procArgs).Msg("exec cmd")
+	detach := ctx.Bool("detach")
+	log.Debug().Bool("detach", detach).Strs("args", procArgs).Msg("exec cmd")
 
 	if detach {
 		pidFile := ctx.String("pid-file")

@@ -131,7 +131,7 @@ func resolveMountDestination(rootfs string, dst string) (dstPath string, err err
 	// start path resolution at rootfs
 	for i, entry := range entries {
 		currentPath, err = resolvePathRelative(rootfs, currentPath, entry)
-	  log.Trace().Err(err).Str("dst:", currentPath).Msg("path resolved")
+		log.Trace().Err(err).Str("dst:", currentPath).Msg("path resolved")
 		if err != nil {
 			// The already resolved path is concatenated with the remaining path,
 			// if resolution of path fails at some point.

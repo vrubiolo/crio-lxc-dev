@@ -42,10 +42,10 @@ var createCmd = cli.Command{
 			Usage: "path to write container PID",
 		},
 		&cli.DurationFlag{
-			Name:  "timeout",
-			Usage: "timeout for container creation",
+			Name:    "timeout",
+			Usage:   "timeout for container creation",
 			EnvVars: []string{"CRIO_LXC_CREATE_TIMEOUT"},
-			Value: time.Second * 5,
+			Value:   time.Second * 5,
 		},
 	},
 }
@@ -214,7 +214,7 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 			}
 
 			if err := clxc.SetConfigItem(configKey, configVal); err != nil {
-			  return err
+				return err
 			}
 		}
 	}
@@ -222,7 +222,7 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 	if len(nsToClone) > 0 {
 		configVal = strings.Join(nsToClone, " ")
 		if err := clxc.SetConfigItem("lxc.namespace.clone", configVal); err != nil {
-		  return err
+			return err
 		}
 	}
 	return nil
@@ -245,7 +245,7 @@ func doCreate(ctx *cli.Context) error {
 	c := clxc.Container
 
 	if err := clxc.SetConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
-	  return err
+		return err
 	}
 
 	err = c.SetLogLevel(clxc.LogLevel)
@@ -277,25 +277,25 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		aaprofile = "unconfined"
 	}
 	if err := clxc.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
-	  return err
+		return err
 	}
 
 	if spec.Process.OOMScoreAdj != nil {
 		if err := clxc.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
-		  return err
+			return err
 		}
 	}
 
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
-		  return err
+			return err
 		}
 	}
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
 	// the container runtime MUST NOT be deleted by the container runtime.
 	if err := clxc.SetConfigItem("lxc.ephemeral", "0"); err != nil {
-	  return err
+		return err
 	}
 
 	if err := configureCapabilities(ctx, c, spec); err != nil {
@@ -303,22 +303,22 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	}
 
 	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
-	  return err
+		return err
 	}
 	if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
-	  return err
+		return err
 	}
 
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-		  return err
+			return err
 		}
 	}
 
 	for _, m := range spec.Linux.GIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-		  return err
+			return err
 		}
 	}
 
@@ -343,7 +343,7 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 	}
 
 	if err := clxc.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
-	  return err
+		return err
 	}
 	return nil
 }
@@ -359,39 +359,39 @@ func ensureDevNull(spec *specs.Spec) {
 	devNull := specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3, FileMode: &mode, UID: &uid, GID: &gid}
 	spec.Linux.Devices = append(spec.Linux.Devices, devNull)
 
-  allowDevNull := specs.LinuxDeviceCgroup{Allow: true, Type: devNull.Type, Major: &devNull.Major, Minor: &devNull.Minor, Access:"rw"} 
-  spec.Linux.Resources.Devices  = append(spec.Linux.Resources.Devices, allowDevNull)
+	allowDevNull := specs.LinuxDeviceCgroup{Allow: true, Type: devNull.Type, Major: &devNull.Major, Minor: &devNull.Minor, Access: "rw"}
+	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, allowDevNull)
 	//return clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw")
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
-  /*
-	if ctx.Bool("systemd-cgroup") {
-	  if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
-	    return err
-	  }
-	}
+	/*
+		if ctx.Bool("systemd-cgroup") {
+		  if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
+		    return err
+		  }
+		}
 	*/
 
 	if linux.CgroupsPath != "" {
 		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
-		  return err
+			return err
 		}
 	}
 
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
-	  return err
+		return err
 	}
 
 	// autodev is required ?
 	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
-	  return err
+		return err
 	}
 
 	if err := addHookCreateDevices(ctx, c, spec); err != nil {
-			return errors.Wrapf(err, "failed to add create devices hook")
+		return errors.Wrapf(err, "failed to add create devices hook")
 	}
 
 	// Set cgroup device permissions.
@@ -419,25 +419,25 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 		val := fmt.Sprintf("%s %s:%s %s", devType, maj, min, dev.Access)
 		if err := clxc.SetConfigItem(key, val); err != nil {
-		  return err
+			return err
 		}
 	}
 
-  // cri-o does not create /dev/null from the container config for privileged devices,
-  // https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
-  // but lxc does not start without /dev/null 
-  // ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
+	// cri-o does not create /dev/null from the container config for privileged devices,
+	// https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
+	// but lxc does not start without /dev/null
+	// ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
 
 	// allow /dev/null
 	// /dev/zero
 	/*
-	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
-	  return err
-	}
-	// /dev/urandom
-	if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
-	  return err
-	}
+		if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
+		  return err
+		}
+		// /dev/urandom
+		if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
+		  return err
+		}
 	*/
 
 	// Memory restriction configuration
@@ -450,32 +450,32 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		log.Debug().Msg("configure cgroup cpu controller")
 		if cpu.Shares != nil && *cpu.Shares > 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
-			  return err
+				return err
 			}
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
-			  return err
+				return err
 			}
 		}
 		if cpu.Period != nil && *cpu.Period != 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
-			  return err
+				return err
 			}
 		}
 		if cpu.Cpus != "" {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpuset.cpus", cpu.Cpus); err != nil {
-			  return err
+				return err
 			}
 		}
 		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
-			  return err
+				return err
 			}
 		}
 		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
-			  return err
+				return err
 			}
 		}
 		// Mems string `json:"mems,omitempty"`
@@ -484,7 +484,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// Task resource restriction configuration.
 	if pids := linux.Resources.Pids; pids != nil {
 		if err := clxc.SetConfigItem("lxc.cgroup.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
-		  return err
+			return err
 		}
 	}
 	// BlockIO restriction configuration
@@ -572,11 +572,11 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	}
 
 	if err := clxc.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
-	  return err
+		return err
 	}
 
 	if err := clxc.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
-	  return err
+		return err
 	}
 
 	err := RunCommand("mkdir", "-p", "-m", "0750", filepath.Join(spec.Root.Path, CFG_DIR))
@@ -609,11 +609,11 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		// https://github.com/lxc/lxc/issues/1702
 	}
 	if err := clxc.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
-	  return err
+		return err
 	}
 
 	if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
-	  log.Debug().Msg("cgroup namespace is not enabled")
+		log.Debug().Msg("cgroup namespace is not enabled")
 	}
 
 	for _, ms := range mounts {
@@ -654,9 +654,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		opts := strings.Join(ms.Options, ",")
 		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, opts)
 
-    if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-      return err
-    }
+		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+			return err
+		}
 	}
 
 	rootmnt := spec.Root.Path
@@ -695,12 +695,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	}
 
 	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
-	  return err
+		return err
 	}
 
-  // pass context information as environment variables to hook scripts
+	// pass context information as environment variables to hook scripts
 	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
-	  return err
+		return err
 	}
 
 	if err := configureNamespaces(c, spec); err != nil {
@@ -748,11 +748,11 @@ func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 	// FIXME exclude all directories that are below other mounts
 	// only directories / files on the readonly rootfs must be created
 	//if filepath.Base(ms.Destination) != filepath.Join(spec.Root.Path, "/dev") {
-		err := os.MkdirAll(ms.Destination, 0755)
-	  log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
-		if err != nil {
-			return errors.Wrap(err, "failed to create mount destination")
-		}
+	err := os.MkdirAll(ms.Destination, 0755)
+	log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
+	if err != nil {
+		return errors.Wrap(err, "failed to create mount destination")
+	}
 	//}
 	return nil
 }
@@ -762,7 +762,7 @@ func saveConfig(ctx *cli.Context, c *lxc.Container, configFilePath string) error
 	// Do not edit config after this.
 	err := c.SaveConfigFile(configFilePath)
 	log.Debug().Err(err).Str("config", configFilePath).Msg("save config file")
-  if err != nil {
+	if err != nil {
 		return errors.Wrapf(err, "failed to save config file to '%s'", configFilePath)
 	}
 	return nil

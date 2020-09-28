@@ -10,6 +10,7 @@ import (
 const (
 	CURRENT_OCI_VERSION = "0.2.1"
 )
+
 var version string
 var clxc CrioLXC
 
@@ -86,8 +87,8 @@ func main() {
 	}
 
 	app.Before = func(ctx *cli.Context) error {
-	  clxc.Command = ctx.Args().Get(0)
-	  return nil
+		clxc.Command = ctx.Args().Get(0)
+		return nil
 	}
 
 	setupCmd := func(ctx *cli.Context) error {
@@ -96,26 +97,26 @@ func main() {
 			return errors.New("missing container ID")
 		}
 		clxc.ContainerID = containerID
-	  clxc.Command = ctx.Command.Name
+		clxc.Command = ctx.Command.Name
 
-    // FIXME container directory is not yet created ...
-    // so log file can not be created
-	  if err := clxc.configureLogging(); err != nil {
-	    return err
-	  }
+		// FIXME container directory is not yet created ...
+		// so log file can not be created
+		if err := clxc.configureLogging(); err != nil {
+			return err
+		}
 
 		log.Info().Strs("args", os.Args).Msg("run cmd")
 		return nil
 	}
 	for _, cmd := range app.Commands {
-	  cmd.Before = setupCmd
+		cmd.Before = setupCmd
 	}
 
 	err := app.Run(os.Args)
 	log.Info().Err(err).Msg("done")
 	clxc.Release()
 	if err != nil {
-	  // write diagnostics message to stderr for crio/kubelet
+		// write diagnostics message to stderr for crio/kubelet
 		println(err.Error())
 		os.Exit(1)
 	}
