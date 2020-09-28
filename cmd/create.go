@@ -304,9 +304,9 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 	// Crio sets the apparmor profile from the container spec.
 	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
 	aaprofile := spec.Process.ApparmorProfile
-	if aaprofile == "" {
+//	if aaprofile == "" {
 		aaprofile = "unconfined"
-	}
+//	}
 	if err := clxc.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
 		return err
 	}
@@ -317,11 +317,13 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
+  /*
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
 			return err
 		}
 	}
+	*/
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
 	// the container runtime MUST NOT be deleted by the container runtime.
@@ -410,9 +412,11 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 	}
 
+  /* --> does not work ? 
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
 		return err
 	}
+	*/
 
 	// autodev is required ?
 	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
@@ -426,10 +430,11 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// Set cgroup device permissions.
 	// Device rule parsing in LXC is not well documented in lxc.container.conf
 	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
+	/*
 	for _, dev := range linux.Resources.Devices {
-		key := "lxc.cgroup.devices.deny"
+		key := "lxc.cgroup2.devices.deny"
 		if dev.Allow {
-			key = "lxc.cgroup.devices.allow"
+			key = "lxc.cgroup2.devices.allow"
 		}
 
 		devType := "a" // 'type' is a (all), c (char), or b (block).
@@ -451,6 +456,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 			return err
 		}
 	}
+	*/
 
 	// cri-o does not create /dev/null from the container config for privileged devices,
 	// https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
@@ -478,32 +484,34 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
 		log.Debug().Msg("configure cgroup cpu controller")
 		if cpu.Shares != nil && *cpu.Shares > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+		  /*
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
 				return err
 			}
+			*/
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
 				return err
 			}
 		}
 		if cpu.Period != nil && *cpu.Period != 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
 				return err
 			}
 		}
 		if cpu.Cpus != "" {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpuset.cpus", cpu.Cpus); err != nil {
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
 				return err
 			}
 		}
 		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
 				return err
 			}
 		}
 		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
+			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
 				return err
 			}
 		}
@@ -512,7 +520,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 	// Task resource restriction configuration.
 	if pids := linux.Resources.Pids; pids != nil {
-		if err := clxc.SetConfigItem("lxc.cgroup.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
+		if err := clxc.SetConfigItem("lxc.cgroup2.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
 			return err
 		}
 	}
