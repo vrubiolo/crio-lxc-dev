@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -34,7 +33,6 @@ func doDelete(ctx *cli.Context) error {
 	}
 	c := clxc.Container
 
-	errnum := c.ErrorNum()
 	state := c.State()
 	if state != lxc.STOPPED {
 		if !ctx.Bool("force") {
@@ -49,12 +47,6 @@ func doDelete(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to delete container.")
 	}
 
-	if errnum != 0 && clxc.BackupOnError {
-		backupDir := filepath.Join(clxc.BackupDir, clxc.ContainerID)
-		err := os.Rename(clxc.RuntimePath(), backupDir)
-		log.Error().Err(err).Str("backup:", backupDir).Int("state", c.ErrorNum()).Msg("move resources of failed container")
-		return err
-	}
 	// "Note that resources associated with the container,
 	// but not created by this container, MUST NOT be deleted."
 

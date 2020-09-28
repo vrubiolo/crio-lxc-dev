@@ -229,6 +229,25 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 }
 
 func doCreate(ctx *cli.Context) error {
+	createErr := doCreateInternal(ctx)
+	if createErr != nil && clxc.BackupOnError {
+		backupDir := filepath.Join(clxc.BackupDir, clxc.ContainerID)
+		err := os.MkdirAll(clxc.BackupDir, 0755)
+		if err != nil {
+			log.Error().Err(err).Str("dir:", clxc.BackupDir).Msg("failed to create backup dir")
+			return createErr
+		}
+		err = RunCommand("cp", "-r", clxc.RuntimePath(), backupDir)
+		if err != nil {
+			log.Error().Err(err).Str("dir:", backupDir).Msg("failed to copy runtime directory to backup dir")
+			return createErr
+		}
+		log.Error().Err(createErr).Str("dir:", backupDir).Msg("runtime directory copied to backup dir")
+	}
+	return createErr
+}
+
+func doCreateInternal(ctx *cli.Context) error {
 	if err := checkRuntime(ctx); err != nil {
 		return errors.Wrap(err, "runtime requirements check failed")
 	}
