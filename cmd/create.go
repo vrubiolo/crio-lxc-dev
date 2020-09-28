@@ -382,6 +382,18 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 }
 
 func ensureDevNull(spec *specs.Spec) {
+  clxc.SetConfigItem("lxc.cgroup2.devices.deny", "a")
+	clxc.SetConfigItem("lxc.cgroup2.devices.allow", "c *:* m")
+	clxc.SetConfigItem("lxc.cgroup2.devices.allow", "b *:* m")
+	allow := []string{
+	  "c 1:3 rwm", "c 1:5 rwm", "c 1:7 rwm",
+	  "c 5:1 rwm", "c 5:2 rwm", "c 1:8 rwm", "c 1:9 rwm",
+	  "c 136:* rwm", "c 10:229 rwm",
+	}
+	for _, dev := range allow {
+	  clxc.SetConfigItem("lxc.cgroup2.devices.allow", dev)
+  }
+
 	for _, dev := range spec.Linux.Devices {
 		if dev.Path == "/dev/null" {
 			return
@@ -394,7 +406,7 @@ func ensureDevNull(spec *specs.Spec) {
 
 	allowDevNull := specs.LinuxDeviceCgroup{Allow: true, Type: devNull.Type, Major: &devNull.Major, Minor: &devNull.Minor, Access: "rw"}
 	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, allowDevNull)
-	//return clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:3 rw")
+	//clxc.SetConfigItem("lxc.cgroup2.devices.allow", "c 1:3 rw")
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -426,6 +438,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	if err := addHookCreateDevices(ctx, c, spec); err != nil {
 		return errors.Wrapf(err, "failed to add create devices hook")
 	}
+
+	return nil
 
 	// Set cgroup device permissions.
 	// Device rule parsing in LXC is not well documented in lxc.container.conf
