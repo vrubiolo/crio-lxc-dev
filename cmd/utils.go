@@ -250,3 +250,19 @@ func LinuxRelease() (*Release, error) {
 	releaseData := string(uts.Release[:zi])
 	return ParseUtsnameRelease(releaseData)
 }
+
+// accessMask returns the octal access mask required for 'chmod'
+func accessMask(mode os.FileMode) string {
+	pos1 := 0
+	if mode&os.ModeSetuid == os.ModeSetuid {
+		pos1 += 4
+	}
+	if mode&os.ModeSetgid == os.ModeSetgid {
+		pos1 += 2
+	}
+	if mode&os.ModeSticky == os.ModeSticky {
+		pos1 += 1
+	}
+
+	return fmt.Sprintf("%d%03o", pos1, mode.Perm())
+}

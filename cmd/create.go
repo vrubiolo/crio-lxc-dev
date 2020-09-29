@@ -379,9 +379,9 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 	return nil
 }
 
-func deviceExists(spec *specs.Spec, dev specs.LinuxDevice) bool {
-	for _, existing := range spec.Linux.Devices {
-		if existing.Path == dev.Path {
+func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {
+	for _, specDev := range spec.Linux.Devices {
+		if specDev.Path == dev.Path {
 			return true
 		}
 	}
@@ -398,14 +398,17 @@ func addDevice(spec *specs.Spec, dev specs.LinuxDevice, mode os.FileMode, uid, g
 	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, devCgroup)
 }
 
-// See https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#default-devices
-// crio should add them to the spec, but it does not do so for privileged containers
-// cri-o does not create /dev/null from the container config for privileged devices,
-// https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
-// but lxc does not start without /dev/null
-// ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
-//
-func ensureDefaultDevices(spec *specs.Spec) {
+// ensureDefaultDevices adds the mandatory devices defined in https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#default-devices
+// to the given container spec if required.
+// crio can add devices to containers, but this does not work for privileged containers.
+// See https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
+// TODO file an issue on cri-o (at least for support)
+func ensureDefaultDevices(spec *specs.Spec) error {
+	// make sure autodev is disabled
+	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
+		return err
+	}
+
 	mode := os.FileMode(0666)
 	var uid, gid uint32 = spec.Process.User.UID, spec.Process.User.GID
 
@@ -420,37 +423,24 @@ func ensureDefaultDevices(spec *specs.Spec) {
 		specs.LinuxDevice{Path: "/dev/ptmx", Type: "c", Major: 5, Minor: 2},
 	}
 
+	// add missing default devices
 	for _, dev := range devices {
-		if !deviceExists(spec, dev) {
+		if !isDeviceEnabled(spec, dev) {
 			addDevice(spec, dev, mode, uid, gid)
 		}
 	}
+	return nil
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
-	if ctx.Bool("systemd-cgroup") {
-		if err :=	clxc.SetConfigItem("lxc.cgroup.root", "system.slice"); err != nil {
-		  return err
-		}
-	}
+	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
 
 	if linux.CgroupsPath != "" {
 		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
 			return err
 		}
-	}
-
-  /* --> does not work ? 
-	if err := clxc.SetConfigItem("lxc.cgroup.relative", "1"); err != nil {
-		return err
-	}
-	*/
-
-	// autodev is required ?
-	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
-		return err
 	}
 
 	if err := addHookCreateDevices(ctx, c, spec); err != nil {
@@ -462,14 +452,17 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
 	// mixing allow/deny is not permitted by lxc.cgroup2.devices
 	// either build up a deny list or an allow list
-	key := "lxc.cgroup2.devices.allow"
+	devicesAllow := "lxc.cgroup2.devices.allow"
+	devicesDeny := "lxc.cgroup2.devices.deny"
+
+	anyDevice := ""
+	blockDevice := "b"
+	charDevice := "c"
+
 	for _, dev := range linux.Resources.Devices {
-		if !dev.Allow {
-			continue
-		}
-		devType := "a" // 'type' is a (all), c (char), or b (block).
-		if dev.Type != "" {
-			devType = dev.Type
+		key := devicesDeny
+		if dev.Allow {
+			key = devicesAllow
 		}
 
 		maj := "*"
@@ -481,9 +474,25 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		if dev.Minor != nil {
 			min = fmt.Sprintf("%d", *dev.Minor)
 		}
-		val := fmt.Sprintf("%s %s:%s %s", devType, maj, min, dev.Access)
-		if err := clxc.SetConfigItem(key, val); err != nil {
-			return err
+
+		switch dev.Type {
+		case anyDevice:
+			// decompose
+			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+			val = fmt.Sprintf("%s %s:%s %s", charDevice, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+		case blockDevice, charDevice:
+			val := fmt.Sprintf("%s %s:%s %s", dev.Type, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("Invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
 		}
 	}
 
@@ -496,10 +505,10 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
 		log.Debug().Msg("configure cgroup cpu controller")
 		if cpu.Shares != nil && *cpu.Shares > 0 {
-		  /*
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
-				return err
-			}
+			/*
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+					return err
+				}
 			*/
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
@@ -507,11 +516,13 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 				return err
 			}
 		}
-		if cpu.Period != nil && *cpu.Period != 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
-				return err
+		/*
+			if cpu.Period != nil && *cpu.Period != 0 {
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+					return err
+				}
 			}
-		}
+		*/
 		if cpu.Cpus != "" {
 			if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
 				return err
@@ -554,18 +565,25 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 // The hook is run within the host namespace, after all rootfs setup is completed.
 func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	hookPath := clxc.RuntimePath("create_devices.sh")
+	log.Debug().Str("path:", hookPath).Msg("create device hook")
 	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	ensureDefaultDevices(spec)
+	if err := ensureDefaultDevices(spec); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(f, "#!/bin/sh -x")
+	if clxc.LogLevel == lxc.TRACE {
+		fmt.Fprintln(f, "#!/bin/sh -x")
+	} else {
+		fmt.Fprintln(f, "#!/bin/sh")
+	}
 	fmt.Fprintf(f, "cd $LXC_ROOTFS_MOUNT\n")
 	for _, dev := range spec.Linux.Devices {
-		mode := os.FileMode(0777) // umask ?
+		mode := os.FileMode(0666)
 		if dev.FileMode != nil {
 			mode = *dev.FileMode
 		}
@@ -577,33 +595,11 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 		if dev.GID != nil {
 			gid = *dev.GID
 		}
-		//fmt.Fprintf(f, "if ! [ -e \".%s\" ]; then\n", dev.Path)
 		fmt.Fprintf(f, "mkdir -p .%s\n", filepath.Dir(dev.Path))
 		fmt.Fprintf(f, "mknod -m %s .%s %s %d %d || exit 1\n", accessMask(mode), dev.Path, dev.Type, dev.Major, dev.Minor)
 		fmt.Fprintf(f, "chown -v %d:%d .%s || exit 1\n", uid, gid, dev.Path)
-		//fmt.Fprintf(f, "fi\n")
 	}
-	//fmt.Fprintf(f, "sleep 1\n")
 	return clxc.SetConfigItem("lxc.hook.mount", hookPath)
-}
-
-func accessMask(stat os.FileMode) string {
-	/*
-	  A numeric mode is from one to four octal digits (0-7), derived by adding up the bits with values 4, 2, and 1. Omitted digits are assumed to be leading zeros. The first digit selects the set user ID (4) and set group ID (2) and restricted deletion or sticky (1) attributes. The second digit selects permissions for the user who owns the file: read (4), write (2), and execute (1); the third selects permissions for other users in the file's group, with the same values; and the fourth for other users not in the file's group, with the same values.
-	*/
-
-	pos1 := 0
-	if stat&os.ModeSetuid == os.ModeSetuid {
-		pos1 += 4
-	}
-	if stat&os.ModeSetgid == os.ModeSetgid {
-		pos1 += 2
-	}
-	if stat&os.ModeSticky == os.ModeSticky {
-		pos1 += 1
-	}
-
-	return fmt.Sprintf("0%d%03o", pos1, stat.Perm())
 }
 
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
@@ -660,7 +656,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := clxc.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
 		return err
 	}
-	// disable auto-mounting ?
+	// excplicitly disable auto-mounting
 	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
 		return err
 	}
@@ -719,7 +715,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		// If the path to mask is a directory we make it readonly instead, since
 		// The `optional` mount option is set to let lxc skip over invalid / inaccessible paths.
 
-		// will fail if target is a directory, maybe use apparmor instead ?
+		// TODO masking paths only works if destination is a file
+		// Can apparmor be used to mask paths instead ?
 		mnt := fmt.Sprintf("%s %s %s %s", "/dev/null", strings.TrimLeft(p, "/"), "none", "bind,optional")
 		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 			return errors.Wrap(err, "failed to mask path")
@@ -874,30 +871,30 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 		if err := saveConfig(ctx, c, configFilePath); err != nil {
 			return err
 		}
-		err := startConsole(cmd, consoleSocket)
-		if err != nil {
-			return err
-		}
-	} else {
-		if !spec.Process.Terminal {
-			// Inherit stdio from calling process (conmon)
-			// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
-			// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
-			if err := clxc.SetConfigItem("lxc.console.path", "none"); err != nil {
-				return errors.Wrap(err, "failed to disable PTY")
-			}
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-		}
-		if err := saveConfig(ctx, c, configFilePath); err != nil {
-			return err
-		}
-		err := cmd.Start()
-		if err != nil {
-			return err
-		}
+		return startConsole(cmd, consoleSocket)
 	}
+	if !spec.Process.Terminal {
+		// Inherit stdio from calling process (conmon)
+		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
+		// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
+		if err := clxc.SetConfigItem("lxc.console.path", "none"); err != nil {
+			return errors.Wrap(err, "failed to disable PTY")
+		}
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
+	if err := saveConfig(ctx, c, configFilePath); err != nil {
+		return err
+	}
+	err := cmd.Start()
+	if err != nil {
+		return err
+	}
+	//cmd.Process.Release()
+
+	log.Debug().Msg("waiting for PID file")
 	pidfile := ctx.String("pid-file")
 	if pidfile != "" {
 		err := createPidFile(pidfile, cmd.Process.Pid)
@@ -906,6 +903,7 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 		}
 	}
 
+	log.Debug().Msg("waiting for container creation")
 	if !waitContainerCreated(c, timeout) {
 		return fmt.Errorf("waiting for container timed out (%s)", timeout)
 	}
@@ -915,6 +913,7 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 func waitContainerCreated(c *lxc.Container, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		log.Debug().Msg("container init state")
 		pid, state := getContainerInitState(c)
 		if pid > 0 && state == stateCreated {
 			return true

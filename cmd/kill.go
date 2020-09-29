@@ -85,6 +85,8 @@ func PidfdSendSignal(pidfd uintptr, signum unix.Signal) error {
 	return nil
 }
 
+// Retrieve the PID from container init process safely.
+// This is not required when lxc uses pidfd internally
 func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	pid := c.InitPid()
 	if pid < 0 {
@@ -96,7 +98,7 @@ func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	if err != nil {
 		// This may fail if either the proc filesystem is not mounted, or
 		// the process has died
-		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", err)
+		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", pid, err)
 	}
 	// double check that the init process still exists, and the proc
 	// directory actually belongs to the init process.
