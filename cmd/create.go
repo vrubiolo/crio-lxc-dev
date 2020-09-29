@@ -29,9 +29,9 @@ var createCmd = cli.Command{
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			// Is the bundle directory the runtime-root ?
-			Name:  "bundle",
-			Usage: "set bundle directory",
-			Value: ".",
+			Name:        "bundle",
+			Usage:       "set bundle directory",
+			Value:       ".",
 			Destination: &clxc.BundlePath,
 		},
 		&cli.StringFlag{
@@ -186,7 +186,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	// change permissions
 	err = unix.Chown(cmdFile, int(spec.Process.User.UID), int(spec.Process.User.GID))
 	if err != nil {
-	  return errors.Wrapf(err, "failed to set owner/group from spec.Process.User to %s", cmdFile)
+		return errors.Wrapf(err, "failed to set owner/group from spec.Process.User to %s", cmdFile)
 	}
 	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
@@ -287,7 +287,7 @@ func doCreateInternal(ctx *cli.Context) error {
 		c.SetVerbosity(lxc.Verbose)
 	}
 
-  clxc.SpecPath = filepath.Join(clxc.BundlePath, "config.json")
+	clxc.SpecPath = filepath.Join(clxc.BundlePath, "config.json")
 	spec, err := readBundleSpec(clxc.SpecPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
@@ -317,13 +317,11 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
- 
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
 			return err
 		}
 	}
-
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
 	// the container runtime MUST NOT be deleted by the container runtime.
@@ -381,32 +379,52 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 	return nil
 }
 
-func ensureDevNull(spec *specs.Spec) {
-  clxc.SetConfigItem("lxc.cgroup2.devices.deny", "a")
-	clxc.SetConfigItem("lxc.cgroup2.devices.allow", "c *:* m")
-	clxc.SetConfigItem("lxc.cgroup2.devices.allow", "b *:* m")
-	allow := []string{
-	  "c 1:3 rwm", "c 1:5 rwm", "c 1:7 rwm",
-	  "c 5:1 rwm", "c 5:2 rwm", "c 1:8 rwm", "c 1:9 rwm",
-	  "c 136:* rwm", "c 10:229 rwm",
-	}
-	for _, dev := range allow {
-	  clxc.SetConfigItem("lxc.cgroup2.devices.allow", dev)
-  }
-
-	for _, dev := range spec.Linux.Devices {
-		if dev.Path == "/dev/null" {
-			return
+func deviceExists(spec *specs.Spec, dev specs.LinuxDevice) bool {
+	for _, existing := range spec.Linux.Devices {
+		if existing.Path == dev.Path {
+			return true
 		}
 	}
-	mode := os.ModePerm
-	var uid, gid uint32 = spec.Process.User.UID, spec.Process.User.GID
-	devNull := specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3, FileMode: &mode, UID: &uid, GID: &gid}
-	spec.Linux.Devices = append(spec.Linux.Devices, devNull)
+	return false
+}
 
-	allowDevNull := specs.LinuxDeviceCgroup{Allow: true, Type: devNull.Type, Major: &devNull.Major, Minor: &devNull.Minor, Access: "rw"}
-	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, allowDevNull)
-	//clxc.SetConfigItem("lxc.cgroup2.devices.allow", "c 1:3 rw")
+func addDevice(spec *specs.Spec, dev specs.LinuxDevice, mode os.FileMode, uid, gid uint32) {
+	dev.FileMode = &mode
+	dev.UID = &uid
+	dev.GID = &gid
+	spec.Linux.Devices = append(spec.Linux.Devices, dev)
+
+	devCgroup := specs.LinuxDeviceCgroup{Allow: true, Type: dev.Type, Major: &dev.Major, Minor: &dev.Minor, Access: "rwm"}
+	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, devCgroup)
+}
+
+// See https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#default-devices
+// crio should add them to the spec, but it does not do so for privileged containers
+// cri-o does not create /dev/null from the container config for privileged devices,
+// https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
+// but lxc does not start without /dev/null
+// ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
+//
+func ensureDefaultDevices(spec *specs.Spec) {
+	mode := os.FileMode(0666)
+	var uid, gid uint32 = spec.Process.User.UID, spec.Process.User.GID
+
+	devices := []specs.LinuxDevice{
+		specs.LinuxDevice{Path: "/dev/null", Type: "c", Major: 1, Minor: 3},
+		specs.LinuxDevice{Path: "/dev/zero", Type: "c", Major: 1, Minor: 5},
+		specs.LinuxDevice{Path: "/dev/full", Type: "c", Major: 1, Minor: 7},
+		specs.LinuxDevice{Path: "/dev/random", Type: "c", Major: 1, Minor: 8},
+		specs.LinuxDevice{Path: "/dev/urandom", Type: "c", Major: 1, Minor: 9},
+		specs.LinuxDevice{Path: "/dev/tty", Type: "c", Major: 5, Minor: 0},
+		// FIXME runtime mandates that /dev/ptmx should be bind mount from host - why ?
+		specs.LinuxDevice{Path: "/dev/ptmx", Type: "c", Major: 5, Minor: 2},
+	}
+
+	for _, dev := range devices {
+		if !deviceExists(spec, dev) {
+			addDevice(spec, dev, mode, uid, gid)
+		}
+	}
 }
 
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
@@ -439,18 +457,16 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		return errors.Wrapf(err, "failed to add create devices hook")
 	}
 
-	return nil
-
 	// Set cgroup device permissions.
 	// Device rule parsing in LXC is not well documented in lxc.container.conf
 	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
-	/*
+	// mixing allow/deny is not permitted by lxc.cgroup2.devices
+	// either build up a deny list or an allow list
+	key := "lxc.cgroup2.devices.allow"
 	for _, dev := range linux.Resources.Devices {
-		key := "lxc.cgroup2.devices.deny"
-		if dev.Allow {
-			key = "lxc.cgroup2.devices.allow"
+		if !dev.Allow {
+			continue
 		}
-
 		devType := "a" // 'type' is a (all), c (char), or b (block).
 		if dev.Type != "" {
 			devType = dev.Type
@@ -470,24 +486,6 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 			return err
 		}
 	}
-	*/
-
-	// cri-o does not create /dev/null from the container config for privileged devices,
-	// https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
-	// but lxc does not start without /dev/null
-	// ERROR    utils - utils.c:open_devnull:1230 - No such file or directory - Can't open /dev/null
-
-	// allow /dev/null
-	// /dev/zero
-	/*
-		if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:5 r"); err != nil {
-		  return err
-		}
-		// /dev/urandom
-		if err := clxc.SetConfigItem("lxc.cgroup.devices.allow", "c 1:9 rw"); err != nil {
-		  return err
-		}
-	*/
 
 	// Memory restriction configuration
 	if mem := linux.Resources.Memory; mem != nil {
@@ -562,7 +560,7 @@ func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) 
 	}
 	defer f.Close()
 
-	ensureDevNull(spec)
+	ensureDefaultDevices(spec)
 
 	fmt.Fprintln(f, "#!/bin/sh -x")
 	fmt.Fprintf(f, "cd $LXC_ROOTFS_MOUNT\n")
@@ -698,9 +696,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		ms.Destination = mountDest
 
 		err = createMountDestination(spec, &ms)
-	  if err != nil {
-		  return errors.Wrapf(err, "failed to create mount destination %s", ms.Destination)
-	  }
+		if err != nil {
+			return errors.Wrapf(err, "failed to create mount destination %s", ms.Destination)
+		}
 
 		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, strings.Join(ms.Options, ","))
 
@@ -772,8 +770,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 	info, err := os.Stat(ms.Source)
 	if err != nil && ms.Type == "bind" {
-	    // check if mountpoint is optional ?
-			return errors.Wrapf(err, "failed to access source %s for bind mount", ms.Source)
+		// check if mountpoint is optional ?
+		return errors.Wrapf(err, "failed to access source %s for bind mount", ms.Source)
 	}
 
 	if err == nil && !info.IsDir() {
