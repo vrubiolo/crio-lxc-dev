@@ -62,6 +62,7 @@ var NamespaceMap = map[string]string{
 	"uts":     "uts",
 }
 
+
 // TODO move busybox shell to lxcDir(CFG_DIR) and change interpreter in shell scripts
 // to avoid conflicts with files from container image ....
 func ensureShell(ctx *cli.Context, rootfs string) error {
@@ -195,6 +196,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
 
+// TODO ensure network and user namespace are shared together (why ?
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 	procPidPathRE := regexp.MustCompile(`/proc/(\d+)/ns`)
 
@@ -424,6 +426,9 @@ func ensureDefaultDevices(spec *specs.Spec) error {
 	return nil
 }
 
+// https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config-linux.md
+// TODO New spec will contain a property Unified for cgroupv2 properties
+// https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#unified
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
@@ -653,20 +658,23 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
-	if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
-		log.Debug().Msg("cgroup namespace is not enabled")
-	}
-
 	for _, ms := range mounts {
 		if ms.Type == "cgroup" {
+		  ms.Type = "cgroup2"
+		  ms.Source = "cgroup2"
 			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
 			// from 'man lxc.container.conf':
 			// If cgroup namespaces are enabled, then any cgroup auto-mounting request will be ignored,
 			// since the container can mount the filesystems itself, and automounting can confuse the container.
 			// Make cgroup mountpoint optional if cgroup namespace is not enabled (shared or cloned)
-			if !isNamespaceEnabled(spec, specs.CgroupNamespace) {
-				ms.Options = append(ms.Options, "optional")
-			}
+
+			// namespace check does not work for calico pod/calico-kube-controllers-c9784d67d-2xpgx
+			// cgroupfs is already mounted (because it is shared with the host ?)
+			//if isNamespaceEnabled(spec, specs.CgroupNamespace) {
+			
+			// TODO check cgroupfs is mounted correctly in calico-kube-controllers
+			//	ms.Options = append(ms.Options, "optional")
+			//}
 		}
 
 		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
