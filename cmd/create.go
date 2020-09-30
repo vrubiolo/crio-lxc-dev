@@ -659,8 +659,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	for _, ms := range mounts {
 		if ms.Type == "cgroup" {
-		  ms.Type = "cgroup2"
-		  ms.Source = "cgroup2"
+			ms.Type = "cgroup2"
+			ms.Source = "cgroup2"
 			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
 			// from 'man lxc.container.conf':
 			// If cgroup namespaces are enabled, then any cgroup auto-mounting request will be ignored,
