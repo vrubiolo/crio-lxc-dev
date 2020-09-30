@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/pkg/errors"
 	"os"
 
@@ -116,8 +117,24 @@ func main() {
 		log.Info().Strs("args", os.Args).Msg("run cmd")
 		return nil
 	}
+
+	// Disable the default error messages for cmdline errors.
+	// By default the app/cmd help is printed to stdout, which is not required hen called from cri-o.
+	// Instead the cmdline is reflected to identify cmdline interface errors
+	errUsage := func(context *cli.Context, err error, isSubcommand bool) error {
+		fmt.Fprintf(os.Stderr, "usage error %s: %s\n", err, os.Args)
+		return err
+	}
+
+	app.OnUsageError = errUsage
+
 	for _, cmd := range app.Commands {
 		cmd.Before = setupCmd
+		cmd.OnUsageError = errUsage
+	}
+
+	app.CommandNotFound = func(ctx *cli.Context, cmd string) {
+		fmt.Fprintf(os.Stderr, "undefined subcommand %q cmdline%s\n", cmd, os.Args)
 	}
 
 	err := app.Run(os.Args)
