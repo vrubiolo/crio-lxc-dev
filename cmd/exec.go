@@ -21,7 +21,8 @@ var execCmd = cli.Command{
 	Action:    doExec,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:  "process, p",
+			Name:  "process",
+			Aliases: []string{"p"},
 			Usage: "path to process json",
 			Value: "",
 		},
@@ -31,7 +32,8 @@ var execCmd = cli.Command{
 			Value: "",
 		},
 		&cli.BoolFlag{
-			Name:  "detach, d",
+			Name:  "detach",
+			Aliases: []string{"d"},
 			Usage: "detach from the executed process",
 		},
 	},
