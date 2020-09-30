@@ -62,7 +62,6 @@ var NamespaceMap = map[string]string{
 	"uts":     "uts",
 }
 
-
 // TODO move busybox shell to lxcDir(CFG_DIR) and change interpreter in shell scripts
 // to avoid conflicts with files from container image ....
 func ensureShell(ctx *cli.Context, rootfs string) error {
@@ -120,7 +119,7 @@ func getUserHome(spec *specs.Spec) string {
 }
 
 func shellEscape(buf *strings.Builder, s string) {
-  shellSpecials := []rune{'`', '"', '$', '\\'}
+	shellSpecials := []rune{'`', '"', '$', '\\'}
 	buf.WriteRune('"')
 
 	for i, r := range s {
@@ -170,9 +169,9 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
-	  for _, arg := range spec.Process.Args {
-		  buf.WriteRune(' ')
-		  shellEscape(&buf, arg)
+		for _, arg := range spec.Process.Args {
+			buf.WriteRune(' ')
+			shellEscape(&buf, arg)
 		}
 		buf.WriteRune('\n')
 	}
@@ -671,7 +670,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 			// namespace check does not work for calico pod/calico-kube-controllers-c9784d67d-2xpgx
 			// cgroupfs is already mounted (because it is shared with the host ?)
 			//if isNamespaceEnabled(spec, specs.CgroupNamespace) {
-			
+
 			// TODO check cgroupfs is mounted correctly in calico-kube-controllers
 			//	ms.Options = append(ms.Options, "optional")
 			//}
