@@ -46,17 +46,25 @@ func main() {
 		// lxc-path-keep should be on the same fileystem as lxc-path
 		&cli.StringFlag{
 			Name:        "backup-dir",
-			Usage:       "path to move container directory to when --backup-on-error is set",
+			Usage:       "directory for container runtime directory backups",
 			EnvVars:     []string{"CRIO_LXC_BACKUP_DIR"},
 			Value:       "/var/lib/lxc-backup",
 			Destination: &clxc.BackupDir,
 		},
 		&cli.BoolFlag{
 			Name:        "backup-on-error",
-			Usage:       "move container directory from lxc-path to this directory on error",
+			Usage:       "backup container runtime directory when start-cmd fails",
 			EnvVars:     []string{"CRIO_LXC_BACKUP_ON_ERROR"},
 			Value:       true,
 			Destination: &clxc.BackupOnError,
+		},
+		// backup any container started (e.g to inspect failing init commands)
+		&cli.BoolFlag{
+			Name:        "backup",
+			Usage:       "backup the container runtime before start-cmd is called",
+			EnvVars:     []string{"CRIO_LXC_BACKUP"},
+			Value:       false,
+			Destination: &clxc.Backup,
 		},
 		&cli.StringFlag{
 			Name:        "root",

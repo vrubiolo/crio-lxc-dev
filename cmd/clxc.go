@@ -25,6 +25,7 @@ type CrioLXC struct {
 	LogLevel       lxc.LogLevel
 	LogLevelString string
 	BackupDir      string
+	Backup         bool
 	BackupOnError  bool
 	SystemdCgroup  bool
 	BusyboxBinary  string
@@ -151,4 +152,28 @@ func (c *CrioLXC) SetConfigItem(key, value string) error {
 		log.Debug().Str("key:", key).Str("value:", value).Msg("lxc config")
 	}
 	return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
+}
+
+// BackupRuntimeDirectory creates a backup of the container runtime resources.
+// It returns the path to the backup directory.
+//
+// The following resources are backed up:
+// - all resources created by crio-lxc (lxc config, init script, device creation script ...)
+// - lxc logfiles (if logging is setup per container)
+// - the runtime spec
+func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
+	backupDir = filepath.Join(c.BackupDir, c.ContainerID)
+	err = os.MkdirAll(c.BackupDir, 0755)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create backup dir")
+	}
+	err = RunCommand("cp", "-r", clxc.RuntimePath(), backupDir)
+	if err != nil {
+		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
+	}
+	err = RunCommand("cp", clxc.SpecPath, backupDir)
+	if err != nil {
+		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")
+	}
+	return backupDir, nil
 }

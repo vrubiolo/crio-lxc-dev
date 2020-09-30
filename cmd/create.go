@@ -123,7 +123,6 @@ func getUserHome(spec *specs.Spec) string {
 // Every command argument is quoted and shell specials are escaped
 // for `exec` to process them properly.
 func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
@@ -235,28 +234,16 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 }
 
 func doCreate(ctx *cli.Context) error {
-	createErr := doCreateInternal(ctx)
-	if createErr != nil && clxc.BackupOnError {
-		backupDir := filepath.Join(clxc.BackupDir, clxc.ContainerID)
-		err := os.MkdirAll(clxc.BackupDir, 0755)
-		if err != nil {
-			log.Error().Err(err).Str("dir:", clxc.BackupDir).Msg("failed to create backup dir")
-			return createErr
+	err := doCreateInternal(ctx)
+	if clxc.Backup || (err != nil && clxc.BackupOnError) {
+		backupDir, backupErr := clxc.BackupRuntimeResources()
+		if backupErr == nil {
+			log.Warn().Str("dir:", backupDir).Msg("runtime backup completed")
+		} else {
+			log.Error().Err(backupErr).Str("dir:", backupDir).Msg("runtime backup failed")
 		}
-		err = RunCommand("cp", "-r", clxc.RuntimePath(), backupDir)
-		if err != nil {
-			log.Error().Err(err).Str("dir:", backupDir).Msg("failed to copy lxc runtime directory to backup dir")
-			return createErr
-		}
-		err = RunCommand("cp", clxc.SpecPath, backupDir)
-		if err != nil {
-			log.Error().Err(err).Str("dir:", backupDir).Str("spec:", clxc.SpecPath).Msg("failed to copy runtime spec to backup dir")
-			return createErr
-		}
-
-		log.Error().Err(createErr).Str("dir:", backupDir).Msg("runtime directory copied to backup dir")
 	}
-	return createErr
+	return err
 }
 
 func doCreateInternal(ctx *cli.Context) error {
