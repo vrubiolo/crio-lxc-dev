@@ -118,6 +118,23 @@ func getUserHome(spec *specs.Spec) string {
 	return spec.Process.Cwd
 }
 
+func shellEscape(buf *strings.Builder, s string) {
+  shellSpecials := []rune{'`', '"', '$', '\\'}
+	buf.WriteRune('"')
+
+	for i, r := range s {
+		for _, rs := range shellSpecials {
+			// escape unescaped quotes
+			if r == rs && (i == 0 || s[i-1] != '\\') {
+				buf.WriteRune('\\')
+				break
+			}
+		}
+		buf.WriteRune(r)
+	}
+	buf.WriteRune('"')
+}
+
 // Write the container init command to a file.
 // The command file is then set as "lxc.execute.cmd"
 // Every command argument is quoted and shell specials are escaped
@@ -138,7 +155,9 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 		if len(keyVal) != 2 {
 			return fmt.Errorf("Invalid environment variable %q", envVar)
 		}
-		fmt.Fprintf(&buf, "export %s=\"%s\"\n", keyVal[0], keyVal[1])
+		fmt.Fprintf(&buf, "export %s=", keyVal[0])
+		shellEscape(&buf, keyVal[1])
+		buf.WriteRune('\n')
 	}
 
 	// after exec /proc/{pid}/environ reflects the new state
@@ -150,23 +169,9 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
-		escape := []rune{'`', '"', '$', '\\'}
-
-		for _, arg := range spec.Process.Args {
-			buf.WriteRune(' ')
-			buf.WriteRune('"')
-
-			for i, r := range arg {
-				for _, er := range escape {
-					// escape unescaped quotes
-					if r == er && (i == 0 || arg[i-1] != '\\') {
-						buf.WriteRune('\\')
-						continue
-					}
-				}
-				buf.WriteRune(r)
-			}
-			buf.WriteRune('"')
+	  for _, arg := range spec.Process.Args {
+		  buf.WriteRune(' ')
+		  shellEscape(&buf, arg)
 		}
 		buf.WriteRune('\n')
 	}
