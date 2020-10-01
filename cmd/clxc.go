@@ -171,6 +171,8 @@ func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
 	}
+	// remove syncfifo because it is not of any use and blocks 'grep' within the backup directory.
+	os.Remove(filepath.Join(backupDir, SYNC_FIFO_PATH))
 	err = RunCommand("cp", clxc.SpecPath, backupDir)
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")
