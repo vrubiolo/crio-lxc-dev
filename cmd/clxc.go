@@ -112,8 +112,10 @@ func (c CrioLXC) Release() {
 // By default logging is done on a container base
 // log-dir /lxc-path/{container id}/{lxc.log, crio-lxc.log}
 func (c *CrioLXC) configureLogging() error {
-	if c.LogFilePath == "" {
-		c.LogFilePath = c.RuntimePath("crio-lxc.log")
+	logDir := filepath.Dir(c.LogFilePath)
+	err := os.MkdirAll(logDir, 0750)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create log file directory %s", logDir)
 	}
 
 	f, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
