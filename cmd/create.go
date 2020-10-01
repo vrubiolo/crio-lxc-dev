@@ -167,6 +167,9 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	// change to working directory before running exec
 	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
 
+	// ensure we set the correct hostname
+	fmt.Fprintf(&buf, "busybox hostname %s\n", spec.Hostname)
+
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
 		for _, arg := range spec.Process.Args {
