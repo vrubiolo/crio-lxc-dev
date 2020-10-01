@@ -473,10 +473,10 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 		switch dev.Type {
 		case anyDevice:
-		  // do not deny any device, this will also deny access to default devices
-		  if ! dev.Allow {
-		    continue
-		  }
+			// do not deny any device, this will also deny access to default devices
+			if !dev.Allow {
+				continue
+			}
 			// decompose
 			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
 			if err := clxc.SetConfigItem(key, val); err != nil {
@@ -505,36 +505,36 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
 		log.Debug().Msg("TODO configure cgroup cpu controller")
 		/*
-		if cpu.Shares != nil && *cpu.Shares > 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
-					return err
-				}
-		}
-		if cpu.Quota != nil && *cpu.Quota > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
-				return err
+			if cpu.Shares != nil && *cpu.Shares > 0 {
+					if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+						return err
+					}
 			}
-		}
-			if cpu.Period != nil && *cpu.Period != 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+			if cpu.Quota != nil && *cpu.Quota > 0 {
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
 					return err
 				}
 			}
-		if cpu.Cpus != "" {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
-				return err
+				if cpu.Period != nil && *cpu.Period != 0 {
+					if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+						return err
+					}
+				}
+			if cpu.Cpus != "" {
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
+					return err
+				}
 			}
-		}
-		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
-				return err
+			if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
+					return err
+				}
 			}
-		}
-		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
-				return err
+			if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
+				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
+					return err
+				}
 			}
-		}
 		*/
 		// Mems string `json:"mems,omitempty"`
 	}

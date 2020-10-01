@@ -21,10 +21,10 @@ var execCmd = cli.Command{
 	Action:    doExec,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:  "process",
+			Name:    "process",
 			Aliases: []string{"p"},
-			Usage: "path to process json",
-			Value: "",
+			Usage:   "path to process json",
+			Value:   "",
 		},
 		&cli.StringFlag{
 			Name:  "pid-file",
@@ -32,9 +32,9 @@ var execCmd = cli.Command{
 			Value: "",
 		},
 		&cli.BoolFlag{
-			Name:  "detach",
+			Name:    "detach",
 			Aliases: []string{"d"},
-			Usage: "detach from the executed process",
+			Usage:   "detach from the executed process",
 		},
 	},
 }
