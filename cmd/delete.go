@@ -28,6 +28,9 @@ var deleteCmd = cli.Command{
 
 func doDelete(ctx *cli.Context) error {
 	err := clxc.LoadContainer()
+	if err == ErrContainerNotExist && ctx.Bool("force") {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

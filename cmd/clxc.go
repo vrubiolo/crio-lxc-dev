@@ -39,7 +39,7 @@ func (c CrioLXC) VersionString() string {
 }
 
 var ErrExist = errors.New("container already exists")
-var ErrNotExist = errors.New("container does not exist")
+var ErrContainerNotExist = errors.New("container does not exist")
 
 // RuntimePath builds an absolute filepath which is relative to the containers runtime root.
 func (c *CrioLXC) RuntimePath(subPath ...string) string {
@@ -69,7 +69,7 @@ func (c *CrioLXC) LoadContainer() error {
 	}
 
 	if !configExists {
-		return ErrNotExist
+		return ErrContainerNotExist
 	}
 
 	container, err := lxc.NewContainer(c.ContainerID, c.RuntimeRoot)
