@@ -622,11 +622,11 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
-	err := RunCommand("mkdir", "-p", "-m", "0750", filepath.Join(spec.Root.Path, CFG_DIR))
+	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
 	}
-	err = RunCommand("mkdir", "-p", "-m", "0750", clxc.RuntimePath(CFG_DIR))
+	err = RunCommand("mkdir", "-p", "-m", "0755", clxc.RuntimePath(CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
 	}
