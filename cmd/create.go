@@ -139,11 +139,6 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	// change to working directory before running exec
 	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
 
-	// ensure we set the correct hostname
-	if spec.Hostname != "" {
-		fmt.Fprintf(&buf, "%s hostname %s\n", BUSYBOX_BIN, spec.Hostname)
-	}
-
 	if len(spec.Process.Args) > 0 {
 		buf.WriteString("exec")
 		for _, arg := range spec.Process.Args {
@@ -729,6 +724,18 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
 		return err
+	}
+
+	// ensure we set the correct hostname
+	if spec.Hostname != "" {
+		for _, ns := range spec.Linux.Namespaces {
+			if ns.Type == specs.UTSNamespace && ns.Path != "" {
+				err := RunCommand("nsenter", "--uts="+ns.Path, "hostname", spec.Hostname)
+				if err != nil {
+					return errors.Wrap(err, "failed to set hostname")
+				}
+			}
+		}
 	}
 
 	// pass context information as environment variables to hook scripts
