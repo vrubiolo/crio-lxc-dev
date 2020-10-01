@@ -503,26 +503,23 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// CPU resource restriction configuration
 	if cpu := linux.Resources.CPU; cpu != nil {
 		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
-		log.Debug().Msg("configure cgroup cpu controller")
+		log.Debug().Msg("TODO configure cgroup cpu controller")
+		/*
 		if cpu.Shares != nil && *cpu.Shares > 0 {
-			/*
 				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
 					return err
 				}
-			*/
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
 			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
 				return err
 			}
 		}
-		/*
 			if cpu.Period != nil && *cpu.Period != 0 {
 				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
 					return err
 				}
 			}
-		*/
 		if cpu.Cpus != "" {
 			if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
 				return err
@@ -538,6 +535,7 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 				return err
 			}
 		}
+		*/
 		// Mems string `json:"mems,omitempty"`
 	}
 
