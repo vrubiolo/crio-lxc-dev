@@ -622,6 +622,17 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
+	rootfsOptions := []string{}
+	if spec.Linux.RootfsPropagation != "" {
+		rootfsOptions = append(rootfsOptions, spec.Linux.RootfsPropagation)
+	}
+	if spec.Root.Readonly {
+		rootfsOptions = append(rootfsOptions, "ro")
+	}
+	if err := clxc.SetConfigItem("lxc.rootfs.options", strings.Join(rootfsOptions, ",")); err != nil {
+		return err
+	}
+
 	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
@@ -645,15 +656,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return errors.Wrapf(err, "failed to make sync fifo")
 	}
 
-	rootfsOptions := ""
-	if spec.Root.Readonly {
-		rootfsOptions = "ro"
-		// Bug in lxc ? (rootfs should be mounted readonly after all mounts destination directories have been created ?)
-		// https://github.com/lxc/lxc/issues/1702
-	}
-	if err := clxc.SetConfigItem("lxc.rootfs.options", rootfsOptions); err != nil {
-		return err
-	}
 	// excplicitly disable auto-mounting
 	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
 		return err
@@ -771,6 +773,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 // In any other case a target directory is created.
 // We add 'create=dir' or 'create=file' to mount options because the mount destination
 // may be shadowed by a previous mount. In this case lxc will create the mount destination.
+// TODO check whether this is  desired behaviour in lxc ?
+// Shouldn't the rootfs should be mounted readonly after all mounts destination directories have been created ?
+// https://github.com/lxc/lxc/issues/1702
 func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 	info, err := os.Stat(ms.Source)
 	if err != nil && ms.Type == "bind" {
