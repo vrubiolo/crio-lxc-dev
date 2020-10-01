@@ -167,7 +167,7 @@ func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create backup dir")
 	}
-	err = RunCommand("cp", "-r -p", clxc.RuntimePath(), backupDir)
+	err = RunCommand("cp", "-r", "-p", clxc.RuntimePath(), backupDir)
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
 	}
