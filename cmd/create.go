@@ -62,35 +62,6 @@ var NamespaceMap = map[string]string{
 	"uts":     "uts",
 }
 
-// TODO move busybox shell to lxcDir(CFG_DIR) and change interpreter in shell scripts
-// to avoid conflicts with files from container image ....
-func ensureShell(ctx *cli.Context, rootfs string) error {
-	shPath := filepath.Join(rootfs, "bin/sh")
-	if exists, _ := pathExists(shPath); exists {
-		return nil
-	}
-	err := RunCommand("mkdir", "-p", filepath.Join(rootfs, "bin"))
-	if err != nil {
-		return errors.Wrapf(err, "Failed doing mkdir")
-	}
-
-	busyboxSrc := ctx.String("busybox-static")
-	busyboxDst := filepath.Join(rootfs, "bin/busybox")
-	busyboxLinks := []string{"bin/sh"}
-
-	err = RunCommand("cp", busyboxSrc, busyboxDst)
-	if err != nil {
-		return errors.Wrapf(err, "Failed copying busybox %s", busyboxSrc)
-	}
-	for _, cmd := range busyboxLinks {
-		err = RunCommand("ln", busyboxDst, filepath.Join(rootfs, cmd))
-		if err != nil {
-			return errors.Wrapf(err, "Failed linking %s", cmd)
-		}
-	}
-	return nil
-}
-
 const (
 	// CFG_DIR is bind mounted (readonly) to container
 	CFG_DIR           = "/.crio-lxc"
@@ -98,6 +69,7 @@ const (
 	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
 	INIT_CMD          = CFG_DIR + "/init.sh"
+	BUSYBOX_BIN       = CFG_DIR + "/busybox"
 )
 
 func getUserHome(spec *specs.Spec) string {
@@ -145,7 +117,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	}
 
 	buf := strings.Builder{}
-	buf.WriteString("#!/bin/sh\n")
+	fmt.Fprintf(&buf, "#!%s sh\n", BUSYBOX_BIN)
 	// wait for start command
 	fmt.Fprintf(&buf, "echo %q > %s\n", SYNC_FIFO_CONTENT, SYNC_FIFO_PATH)
 
@@ -169,7 +141,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 
 	// ensure we set the correct hostname
 	if spec.Hostname != "" {
-		fmt.Fprintf(&buf, "/bin/busybox hostname %s\n", spec.Hostname)
+		fmt.Fprintf(&buf, "%s hostname %s\n", BUSYBOX_BIN, spec.Hostname)
 	}
 
 	if len(spec.Process.Args) > 0 {
@@ -656,6 +628,18 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		Options:     []string{"bind", "ro"},
 	})
 
+	busyboxBinDest := clxc.RuntimePath(BUSYBOX_BIN)
+	err = touchFile(busyboxBinDest, 0750)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
+	}
+	mounts = append(mounts, specs.Mount{
+		Source:      clxc.BusyboxBinary,
+		Destination: BUSYBOX_BIN,
+		Type:        "bind",
+		Options:     []string{"bind", "ro"},
+	})
+
 	// create named fifo in lxcpath and mount it into the container
 	if err := makeSyncFifo(clxc.RuntimePath(SYNC_FIFO_PATH)); err != nil {
 		return errors.Wrapf(err, "failed to make sync fifo")
@@ -737,10 +721,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 			return errors.Wrap(err, "failed to make path readonly")
 		}
-	}
-
-	if err := ensureShell(ctx, spec.Root.Path); err != nil {
-		return errors.Wrap(err, "couldn't ensure a shell exists in container")
 	}
 
 	if err := setInitCmd(ctx, c, spec); err != nil {

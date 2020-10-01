@@ -266,3 +266,11 @@ func accessMask(mode os.FileMode) string {
 
 	return fmt.Sprintf("%d%03o", pos1, mode.Perm())
 }
+
+func touchFile(filePath string, perm os.FileMode) error {
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDONLY, perm)
+	if err == nil {
+		f.Close()
+	}
+	return err
+}
