@@ -756,6 +756,12 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if err := configureContainerSecurity(ctx, c, spec); err != nil {
 		return errors.Wrap(err, "failed to configure container security")
 	}
+
+	for key, val := range spec.Linux.Sysctl {
+		if err := clxc.SetConfigItem("lxc.sysctl."+key, val); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
