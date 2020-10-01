@@ -473,6 +473,10 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 
 		switch dev.Type {
 		case anyDevice:
+		  // do not deny any device, this will also deny access to default devices
+		  if ! dev.Allow {
+		    continue
+		  }
 			// decompose
 			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
 			if err := clxc.SetConfigItem(key, val); err != nil {
