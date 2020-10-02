@@ -1,10 +1,9 @@
 *~
 crio-lxc
 crio-lxc-init
+crio-lxc-start
 crio-lxc-test*
 oci/
 roots/
 .stacker/
 .keeptempdirs
-tools/crio-lxc-start
-tools/crio-lxc-kill

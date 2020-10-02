@@ -3,12 +3,23 @@ COMMIT_HASH=$(shell git describe --always --tags --long)
 COMMIT=$(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_HASH)-dirty,$(COMMIT_HASH))
 TEST?=$(patsubst test/%.bats,%,$(wildcard test/*.bats))
 PACKAGES_DIR?=~/packages
+PKG_CONFIG := $(shell pkg-config --libs --cflags lxc)
+BINS := crio-lxc crio-lxc-start crio-lxc-init
+PREFIX ?= /usr/local
 
-default: crio-lxc
+all: $(BINS)
 
 crio-lxc: $(GO_SRC) Makefile go.mod
 	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc ./cmd
-	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc-init ./init
+
+crio-lxc-init: $(GO_SRC) Makefile go.mod
+	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc-init ./cmd/init
+
+crio-lxc-start: cmd/start/crio-lxc-start.c
+	gcc $? $(PKG_CONFIG) -o $@
+
+install: all 
+	cp $(BINS) $(PREFIX)/bin
 
 lint:
 	golangci-lint run -c ./lint.yaml ./...
@@ -29,4 +40,4 @@ vendorup:
 
 .PHONY: clean
 clean:
-	-rm -f crio-lxc
+	-rm -f $(BINS)
