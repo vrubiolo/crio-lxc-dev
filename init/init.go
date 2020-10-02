@@ -4,6 +4,7 @@ import (
 	"github.com/lxc/crio-lxc/clxc"
 	"golang.org/x/sys/unix"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func main() {
 		panic(err)
 	}
 
-	fifo, err := os.OpenFile(spec.SyncFifo, os.O_RDONLY, 0)
+	fifo, err := os.OpenFile(spec.SyncFifo, os.O_WRONLY, 0)
 	if err != nil {
 		fail(err, "open sync fifo")
 	}
@@ -47,21 +48,22 @@ func main() {
 		}
 	}
 
-	// search binary in path ? --> see spec
-	// use os/exec#LookPath for path lookup
-	if err := unix.Access(spec.Args[0], unix.X_OK); err != nil {
-		fail(err, "cmd not executable") // FIXME better error message
-	}
-
-	env := unix.Environ()
-	env = append(env, spec.Env...)
+	//	env := unix.Environ()
+	//env = append(env, spec.Env...)
+	env := spec.Env
 	env = setHome(env, spec.UserName, spec.Cwd)
 
 	if err := unix.Chdir(spec.Cwd); err != nil {
 		fail(err, "change to cwd")
 	}
 
-	err = unix.Exec(spec.Args[0], spec.Args, env)
+	//	runtime.LockOSThread()
+	cmdPath, err := exec.LookPath(spec.Args[0])
+	if err != nil {
+		fail(err, "lookup cmd path")
+	}
+
+	err = unix.Exec(cmdPath, spec.Args, env)
 	if err != nil {
 		fail(err, "exec")
 	}
@@ -76,10 +78,12 @@ func setHome(env []string, userName string, fallback string) []string {
 		return env
 	}
 	// or lookup passwd for home directory
-	passwd := "/etc/passwd"
-	if _, err := os.Stat(passwd); err == nil {
-		if u := GetUser(passwd, userName); u != nil && u.Home != "" {
-			return append(env, "HOME="+u.Home)
+	if userName != "" {
+		passwd := "/etc/passwd"
+		if _, err := os.Stat(passwd); err == nil {
+			if u := GetUser(passwd, userName); u != nil && u.Home != "" {
+				return append(env, "HOME="+u.Home)
+			}
 		}
 	}
 	// and use fallback as last resort

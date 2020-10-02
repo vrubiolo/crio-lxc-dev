@@ -4,11 +4,14 @@ COMMIT=$(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_HASH)-
 TEST?=$(patsubst test/%.bats,%,$(wildcard test/*.bats))
 PACKAGES_DIR?=~/packages
 
-lint:
-	golangci-lint run -c ./lint.yaml ./...
+default: crio-lxc
 
 crio-lxc: $(GO_SRC) Makefile go.mod
 	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc ./cmd
+	go build -ldflags "-X main.version=$(COMMIT)" -o crio-lxc-init ./init
+
+lint:
+	golangci-lint run -c ./lint.yaml ./...
 
 # make test TEST=basic will run only the basic test.
 .PHONY: check

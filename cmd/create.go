@@ -115,6 +115,16 @@ func createInitSpec(spec *specs.Spec) error {
 		Options:     []string{"bind", "ro"},
 	})
 
+	path := "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	for _, kv := range spec.Process.Env {
+		if strings.HasPrefix(kv, "PATH=") {
+			path = kv
+		}
+	}
+	if err := clxc.SetConfigItem("lxc.environment", path); err != nil {
+		return err
+	}
+
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
