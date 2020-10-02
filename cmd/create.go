@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
+	api "github.com/lxc/crio-lxc/clxc"
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
 
@@ -68,28 +68,12 @@ const (
 	SYNC_FIFO         = "/syncfifo"
 	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
 	SYNC_FIFO_CONTENT = "meshuggah rocks"
-	INIT_CMD          = CFG_DIR + "/init.sh"
-	BUSYBOX_BIN       = CFG_DIR + "/busybox"
+	INIT_CMD          = CFG_DIR + "/init"
+	INIT_SPEC         = CFG_DIR + "/spec.json"
+	//BUSYBOX_BIN       = CFG_DIR + "/busybox"
 )
 
-func getUserHome(spec *specs.Spec) string {
-	passwd := filepath.Join(spec.Root.Path, "/etc/passwd")
-
-	if _, err := os.Stat(passwd); err != nil {
-		// search for passwd in mounts
-		for _, m := range spec.Mounts {
-			if m.Destination == passwd {
-				passwd = m.Source
-				break
-			}
-		}
-	}
-	if u := GetUser(passwd, spec.Process.User.Username); u != nil && u.Home != "" {
-		return u.Home
-	}
-	return spec.Process.Cwd
-}
-
+/*
 func shellEscape(buf *strings.Builder, s string) {
 	shellSpecials := []rune{'`', '"', '$', '\\'}
 	buf.WriteRune('"')
@@ -106,11 +90,72 @@ func shellEscape(buf *strings.Builder, s string) {
 	}
 	buf.WriteRune('"')
 }
+*/
+
+func createInitSpec(spec *specs.Spec) error {
+
+	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
+	if err != nil {
+		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
+	}
+	err = RunCommand("mkdir", "-p", "-m", "0755", clxc.RuntimePath(CFG_DIR))
+	if err != nil {
+		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
+	}
+
+	// create named fifo in lxcpath and mount it into the container
+	if err := makeSyncFifo(clxc.RuntimePath(SYNC_FIFO_PATH)); err != nil {
+		return errors.Wrapf(err, "failed to make sync fifo")
+	}
+
+	spec.Mounts = append(spec.Mounts, specs.Mount{
+		Source:      clxc.RuntimePath(CFG_DIR),
+		Destination: strings.Trim(CFG_DIR, "/"),
+		Type:        "bind",
+		Options:     []string{"bind", "ro"},
+	})
+
+	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
+		return err
+	}
+	var initSpec = api.InitSpec{
+		SyncFifo: SYNC_FIFO_PATH,
+		Message:  SYNC_FIFO_CONTENT, // FIXME use the container ID instead ?
+		UserName: spec.Process.User.Username,
+		Env:      spec.Process.Env,
+		Args:     spec.Process.Args,
+		Cwd:      spec.Process.Cwd,
+	}
+	if hasCapability(spec, "CAP_SETGID") {
+		for _, gid := range spec.Process.User.AdditionalGids {
+			initSpec.AdditionalGids = append(initSpec.AdditionalGids, int(gid))
+		}
+	}
+
+	if err := initSpec.WriteFile(clxc.RuntimePath(INIT_SPEC)); err != nil {
+		return errors.Wrap(err, "failed to write init spec")
+	}
+
+	// create destination file for bind mount
+	busyboxBinDest := clxc.RuntimePath(INIT_CMD)
+	err = touchFile(busyboxBinDest, 0750)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
+	}
+	spec.Mounts = append(spec.Mounts, specs.Mount{
+		Source:      clxc.BusyboxBinary,
+		Destination: INIT_CMD,
+		Type:        "bind",
+		Options:     []string{"bind", "ro"},
+	})
+	return clxc.SetConfigItem("lxc.init.cmd", fmt.Sprintf("%s %s", INIT_CMD, INIT_SPEC))
+}
 
 // Write the container init command to a file.
 // The command file is then set as "lxc.execute.cmd"
 // Every command argument is quoted and shell specials are escaped
 // for `exec` to process them properly.
+/*
 func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
@@ -166,6 +211,7 @@ func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	}
 	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
 }
+*/
 
 // TODO ensure network and user namespace are shared together (why ?
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
@@ -305,6 +351,12 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		return err
 	}
 
+	for _, gid := range spec.Process.User.AdditionalGids {
+		if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", gid)); err != nil {
+			return err
+		}
+	}
+
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
@@ -342,6 +394,23 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 		return err
 	}
 	return nil
+}
+
+func hasCapability(spec *specs.Spec, capName string) bool {
+	if capName == "" {
+		return false
+	}
+	if spec.Process.Capabilities == nil {
+		return false
+	}
+
+	for _, c := range spec.Process.Capabilities.Permitted {
+		if strings.ToLower(capName) == strings.ToLower(c) {
+			return true
+		}
+	}
+	return false
+
 }
 
 func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {
@@ -605,47 +674,15 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
-	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
-	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
-	}
-	err = RunCommand("mkdir", "-p", "-m", "0755", clxc.RuntimePath(CFG_DIR))
-	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
-	}
-
-	mounts := spec.Mounts
-
-	mounts = append(mounts, specs.Mount{
-		Source:      clxc.RuntimePath(CFG_DIR),
-		Destination: strings.Trim(CFG_DIR, "/"),
-		Type:        "bind",
-		Options:     []string{"bind", "ro"},
-	})
-
-	busyboxBinDest := clxc.RuntimePath(BUSYBOX_BIN)
-	err = touchFile(busyboxBinDest, 0750)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
-	}
-	mounts = append(mounts, specs.Mount{
-		Source:      clxc.BusyboxBinary,
-		Destination: BUSYBOX_BIN,
-		Type:        "bind",
-		Options:     []string{"bind", "ro"},
-	})
-
-	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(clxc.RuntimePath(SYNC_FIFO_PATH)); err != nil {
-		return errors.Wrapf(err, "failed to make sync fifo")
-	}
+	// write init spec
+	createInitSpec(spec)
 
 	// excplicitly disable auto-mounting
 	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
 		return err
 	}
 
-	for _, ms := range mounts {
+	for _, ms := range spec.Mounts {
 		if ms.Type == "cgroup" {
 			ms.Type = "cgroup2"
 			ms.Source = "cgroup2"
@@ -718,15 +755,14 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
-	if err := setInitCmd(ctx, c, spec); err != nil {
-		return errors.Wrap(err, "failed to set lxc.init.cmd")
-	}
-
 	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
 		return err
 	}
 
-	// ensure we set the correct hostname
+	// The hostname has to be on a shared namespace
+	// when we still have the capability to do so (CAP_SYS_ADMIN)
+	// TODO  why does neither cri-o nor lxc set the hostname?
+	// FIXME avoid to call external command nsenter
 	if spec.Hostname != "" {
 		for _, ns := range spec.Linux.Namespaces {
 			if ns.Type == specs.UTSNamespace && ns.Path != "" {
@@ -734,6 +770,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 				if err != nil {
 					return errors.Wrap(err, "failed to set hostname")
 				}
+				break
 			}
 		}
 	}

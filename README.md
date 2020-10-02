@@ -77,3 +77,7 @@ Expand multi-line output int cri-o log (e.g stacktrace)
 
 echo "output" | sed 's/\\n\\t/\n/g' 
 
+
+# TODO
+## generate nice buttons for the project page
+https://goreportcard.com

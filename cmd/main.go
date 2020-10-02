@@ -84,7 +84,7 @@ func main() {
 			Name:        "busybox-static",
 			Usage:       "path to statically-linked busybox binary",
 			EnvVars:     []string{"CRIO_LXC_BUSYBOX"},
-			Value:       "/bin/busybox",
+			Value:       "/usr/local/bin/crio-lxc-init",
 			Destination: &clxc.BusyboxBinary,
 		},
 		&cli.StringFlag{
