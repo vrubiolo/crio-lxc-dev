@@ -73,25 +73,6 @@ const (
 	//BUSYBOX_BIN       = CFG_DIR + "/busybox"
 )
 
-/*
-func shellEscape(buf *strings.Builder, s string) {
-	shellSpecials := []rune{'`', '"', '$', '\\'}
-	buf.WriteRune('"')
-
-	for i, r := range s {
-		for _, rs := range shellSpecials {
-			// escape unescaped quotes
-			if r == rs && (i == 0 || s[i-1] != '\\') {
-				buf.WriteRune('\\')
-				break
-			}
-		}
-		buf.WriteRune(r)
-	}
-	buf.WriteRune('"')
-}
-*/
-
 func createInitSpec(spec *specs.Spec) error {
 
 	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
@@ -153,75 +134,13 @@ func createInitSpec(spec *specs.Spec) error {
 		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
 	}
 	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.BusyboxBinary,
+		Source:      clxc.InitCommand,
 		Destination: INIT_CMD,
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
 	return clxc.SetConfigItem("lxc.init.cmd", fmt.Sprintf("%s %s", INIT_CMD, INIT_SPEC))
 }
-
-// Write the container init command to a file.
-// The command file is then set as "lxc.execute.cmd"
-// Every command argument is quoted and shell specials are escaped
-// for `exec` to process them properly.
-/*
-func setInitCmd(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
-		return err
-	}
-
-	buf := strings.Builder{}
-	fmt.Fprintf(&buf, "#!%s sh\n", BUSYBOX_BIN)
-	// wait for start command
-	fmt.Fprintf(&buf, "echo %q > %s\n", SYNC_FIFO_CONTENT, SYNC_FIFO_PATH)
-
-	// export environment variables
-	for _, envVar := range spec.Process.Env {
-		keyVal := strings.SplitN(envVar, "=", 2)
-		if len(keyVal) != 2 {
-			return fmt.Errorf("Invalid environment variable %q", envVar)
-		}
-		fmt.Fprintf(&buf, "export %s=", keyVal[0])
-		shellEscape(&buf, keyVal[1])
-		buf.WriteRune('\n')
-	}
-
-	// after exec /proc/{pid}/environ reflects the new state
-	fmt.Fprintf(&buf, "export %s\n", envStateRunning)
-	fmt.Fprintf(&buf, "export HOME=%s\n", getUserHome(spec))
-
-	// change to working directory before running exec
-	fmt.Fprintf(&buf, "cd \"%s\"\n", spec.Process.Cwd)
-
-	if len(spec.Process.Args) > 0 {
-		buf.WriteString("exec")
-		for _, arg := range spec.Process.Args {
-			buf.WriteRune(' ')
-			shellEscape(&buf, arg)
-		}
-		buf.WriteRune('\n')
-	}
-
-	cmdFile := clxc.RuntimePath(INIT_CMD)
-	log.Debug().Str("filepath:", cmdFile).Msg("writing init file")
-	err := ioutil.WriteFile(cmdFile, []byte(buf.String()), 0500)
-	if err != nil {
-		return err
-	}
-	// check that the int script can be executed
-	err = unix.Access(cmdFile, unix.X_OK)
-	if err != nil {
-		return errors.Wrapf(err, "missing 'exec' permissions for %s (filesystem mounted with 'noexec' ?)", cmdFile)
-	}
-	// change permissions
-	err = unix.Chown(cmdFile, int(spec.Process.User.UID), int(spec.Process.User.GID))
-	if err != nil {
-		return errors.Wrapf(err, "failed to set owner/group from spec.Process.User to %s", cmdFile)
-	}
-	return clxc.SetConfigItem("lxc.init.cmd", INIT_CMD)
-}
-*/
 
 // TODO ensure network and user namespace are shared together (why ?
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {

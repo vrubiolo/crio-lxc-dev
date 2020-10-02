@@ -28,8 +28,8 @@ type CrioLXC struct {
 	Backup         bool
 	BackupOnError  bool
 	SystemdCgroup  bool
-	BusyboxBinary  string
 	StartCommand   string
+	InitCommand    string
 	BundlePath     string
 	SpecPath       string
 }

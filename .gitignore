@@ -1,5 +1,6 @@
 *~
 crio-lxc
+crio-lxc-init
 crio-lxc-test*
 oci/
 roots/

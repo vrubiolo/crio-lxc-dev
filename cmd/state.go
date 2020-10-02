@@ -39,11 +39,10 @@ const (
 	// the container process has exited (step 7 in the lifecycle)
 	stateStopped = "stopped"
 
-	// environment variables for the LXC init process to
-	// distinguish between created and running state
-	envState        = "CRIO_LXC_STATE"
-	envStateCreated = envState + "=" + stateCreated
-	envStateRunning = envState + "=" + stateRunning
+	// environment variable to detect container runtime states
+	// - stateCreated: crio-lxc-init is started but blocking at the syncfifo
+	// - stateRunning: crio-lxc-init has executed container process
+	envStateCreated = "CRIO_LXC_STATE=" + stateCreated
 )
 
 func doState(ctx *cli.Context) error {
@@ -68,10 +67,10 @@ func doState(ctx *cli.Context) error {
 	switch state := c.State(); state {
 	case lxc.STARTING:
 		s.Status = stateCreating
-	case lxc.RUNNING, lxc.FROZEN, lxc.THAWED, lxc.STOPPING, lxc.ABORTING, lxc.FREEZING:
-		s.Pid, s.Status = getContainerInitState(c)
 	case lxc.STOPPED:
 		s.Status = stateStopped
+	default:
+		s.Pid, s.Status = getContainerInitState(c)
 	}
 
 	stateJson, err := json.Marshal(s)

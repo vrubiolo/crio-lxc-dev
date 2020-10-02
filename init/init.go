@@ -48,16 +48,12 @@ func main() {
 		}
 	}
 
-	//	env := unix.Environ()
-	//env = append(env, spec.Env...)
-	env := spec.Env
-	env = setHome(env, spec.UserName, spec.Cwd)
+	env := setHome(spec.Env, spec.UserName, spec.Cwd)
 
 	if err := unix.Chdir(spec.Cwd); err != nil {
 		fail(err, "change to cwd")
 	}
 
-	//	runtime.LockOSThread()
 	cmdPath, err := exec.LookPath(spec.Args[0])
 	if err != nil {
 		fail(err, "lookup cmd path")
@@ -77,7 +73,7 @@ func setHome(env []string, userName string, fallback string) []string {
 		}
 		return env
 	}
-	// or lookup passwd for home directory
+	// or lookup users home directory in passwd
 	if userName != "" {
 		passwd := "/etc/passwd"
 		if _, err := os.Stat(passwd); err == nil {
@@ -86,6 +82,6 @@ func setHome(env []string, userName string, fallback string) []string {
 			}
 		}
 	}
-	// and use fallback as last resort
+	// and as last resort the provided fallback path is used
 	return append(env, "HOME="+fallback)
 }
