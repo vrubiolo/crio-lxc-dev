@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/lxc/crio-lxc/clxc"
 	"golang.org/x/sys/unix"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -20,11 +21,12 @@ func (e initError) Error() string {
 func fail(err error, step string) {
 	// TODO write termination message ?
 	// create a custom error ?
-	panic(initError{err, step})
+	e := initError{err, step}
+	ioutil.WriteFile("/dev/termination-log", []byte(e.Error()), 0640)
+	panic(e)
 }
 
 func main() {
-	// write to syncfifo
 	var spec clxc.InitSpec
 	err := spec.ParseFile(os.Args[1])
 	if err != nil {
@@ -41,25 +43,34 @@ func main() {
 		fail(err, "write message to sync fifo")
 	}
 
-	if len(spec.AdditionalGids) > 0 {
-		err := unix.Setgroups(spec.AdditionalGids)
+	if clxc.HasCapability(spec.Spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {
+		gids := make([]int, len(spec.Process.User.AdditionalGids))
+		for _, gid := range spec.Process.User.AdditionalGids {
+			gids = append(gids, int(gid))
+		}
+		err := unix.Setgroups(gids)
 		if err != nil {
 			fail(err, "setgroups")
 		}
 	}
 
-	env := setHome(spec.Env, spec.UserName, spec.Cwd)
+	err = clxc.CreateDevices(spec.Spec)
+	if err != nil {
+		fail(err, "create devices")
+	}
 
-	if err := unix.Chdir(spec.Cwd); err != nil {
+	env := setHome(spec.Process.Env, spec.Process.User.Username, spec.Process.Cwd)
+
+	if err := unix.Chdir(spec.Process.Cwd); err != nil {
 		fail(err, "change to cwd")
 	}
 
-	cmdPath, err := exec.LookPath(spec.Args[0])
+	cmdPath, err := exec.LookPath(spec.Process.Args[0])
 	if err != nil {
 		fail(err, "lookup cmd path")
 	}
 
-	err = unix.Exec(cmdPath, spec.Args, env)
+	err = unix.Exec(cmdPath, spec.Process.Args, env)
 	if err != nil {
 		fail(err, "exec")
 	}

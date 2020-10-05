@@ -112,17 +112,8 @@ func createInitSpec(spec *specs.Spec) error {
 	var initSpec = api.InitSpec{
 		SyncFifo: SYNC_FIFO_PATH,
 		Message:  SYNC_FIFO_CONTENT, // FIXME use the container ID instead ?
-		UserName: spec.Process.User.Username,
-		Env:      spec.Process.Env,
-		Args:     spec.Process.Args,
-		Cwd:      spec.Process.Cwd,
+		Spec:     spec,
 	}
-	if hasCapability(spec, "CAP_SETGID") {
-		for _, gid := range spec.Process.User.AdditionalGids {
-			initSpec.AdditionalGids = append(initSpec.AdditionalGids, int(gid))
-		}
-	}
-
 	if err := initSpec.WriteFile(clxc.RuntimePath(INIT_SPEC)); err != nil {
 		return errors.Wrap(err, "failed to write init spec")
 	}
@@ -325,23 +316,6 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 	return nil
 }
 
-func hasCapability(spec *specs.Spec, capName string) bool {
-	if capName == "" {
-		return false
-	}
-	if spec.Process.Capabilities == nil {
-		return false
-	}
-
-	for _, c := range spec.Process.Capabilities.Permitted {
-		if strings.ToLower(capName) == strings.ToLower(c) {
-			return true
-		}
-	}
-	return false
-
-}
-
 func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {
 	for _, specDev := range spec.Linux.Devices {
 		if specDev.Path == dev.Path {
@@ -409,8 +383,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		}
 	}
 
-	if err := addHookCreateDevices(ctx, c, spec); err != nil {
-		return errors.Wrapf(err, "failed to add create devices hook")
+	if err := ensureDefaultDevices(spec); err != nil {
+		return errors.Wrapf(err, "failed to add default devices")
 	}
 
 	// Set cgroup device permissions.
@@ -528,46 +502,6 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		log.Debug().Msg("TODO configure cgroup network controllers")
 	}
 	return nil
-}
-
-// The hook is run within the host namespace, after all rootfs setup is completed.
-func addHookCreateDevices(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	hookPath := clxc.RuntimePath("create_devices.sh")
-	log.Debug().Str("path:", hookPath).Msg("create device hook")
-	f, err := os.OpenFile(hookPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0750)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := ensureDefaultDevices(spec); err != nil {
-		return err
-	}
-
-	if clxc.LogLevel == lxc.TRACE {
-		fmt.Fprintln(f, "#!/bin/sh -x")
-	} else {
-		fmt.Fprintln(f, "#!/bin/sh")
-	}
-	fmt.Fprintf(f, "cd $LXC_ROOTFS_MOUNT\n")
-	for _, dev := range spec.Linux.Devices {
-		mode := os.FileMode(0666)
-		if dev.FileMode != nil {
-			mode = *dev.FileMode
-		}
-		uid := spec.Process.User.UID
-		if dev.UID != nil {
-			uid = *dev.UID
-		}
-		gid := spec.Process.User.GID
-		if dev.GID != nil {
-			gid = *dev.GID
-		}
-		fmt.Fprintf(f, "mkdir -p .%s\n", filepath.Dir(dev.Path))
-		fmt.Fprintf(f, "mknod -m %s .%s %s %d %d || exit 1\n", accessMask(mode), dev.Path, dev.Type, dev.Major, dev.Minor)
-		fmt.Fprintf(f, "chown -v %d:%d .%s || exit 1\n", uid, gid, dev.Path)
-	}
-	return clxc.SetConfigItem("lxc.hook.mount", hookPath)
 }
 
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
