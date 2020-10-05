@@ -15,7 +15,7 @@ type initError struct {
 }
 
 func (e initError) Error() string {
-	return "failed to:" + e.step + ":" + e.Error()
+	return "failed to:" + e.step + ":" + e.err.Error()
 }
 
 func fail(err error, step string) {
