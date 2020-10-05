@@ -7,31 +7,27 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
 )
 
-var log zerolog.Logger
+var log *clxc.Logger
 
 type CrioLXC struct {
 	*lxc.Container
+	clxc.Logger
 
 	Command string
 
-	RuntimeRoot    string
-	ContainerID    string
-	LogFile        *os.File
-	LogFilePath    string
-	LogLevel       lxc.LogLevel
-	LogLevelString string
-	BackupDir      string
-	Backup         bool
-	BackupOnError  bool
-	SystemdCgroup  bool
-	StartCommand   string
-	InitCommand    string
-	BundlePath     string
-	SpecPath       string
+	RuntimeRoot   string
+	ContainerID   string
+	BackupDir     string
+	Backup        bool
+	BackupOnError bool
+	SystemdCgroup bool
+	StartCommand  string
+	InitCommand   string
+	BundlePath    string
+	SpecPath      string
 }
 
 func (c CrioLXC) VersionString() string {
@@ -107,43 +103,6 @@ func (c CrioLXC) Release() {
 	if c.LogFile != nil {
 		c.LogFile.Close()
 	}
-}
-
-// By default logging is done on a container base
-// log-dir /lxc-path/{container id}/{lxc.log, crio-lxc.log}
-func (c *CrioLXC) configureLogging() error {
-	logDir := filepath.Dir(c.LogFilePath)
-	err := os.MkdirAll(logDir, 0750)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create log file directory %s", logDir)
-	}
-
-	f, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
-	if err != nil {
-		return errors.Wrapf(err, "failed to open log file %s", c.LogFilePath)
-	}
-	c.LogFile = f
-	log = zerolog.New(f).With().Str("cmd:", c.Command).Str("cid:", c.ContainerID).Logger()
-
-	level, err := parseLogLevel(c.LogLevelString)
-	if err != nil {
-		log.Error().Err(err).Stringer("loglevel:", level).Msg("using fallback log-level")
-	}
-	c.LogLevel = level
-
-	switch level {
-	case lxc.TRACE:
-		zerolog.SetGlobalLevel(zerolog.TraceLevel)
-	case lxc.DEBUG:
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	case lxc.INFO:
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	case lxc.WARN:
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	case lxc.ERROR:
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
-	}
-	return nil
 }
 
 func (c *CrioLXC) SetConfigItem(key, value string) error {

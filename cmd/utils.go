@@ -32,23 +32,6 @@ func readBundleSpec(specFilePath string) (spec *specs.Spec, err error) {
 	return spec, nil
 }
 
-func parseLogLevel(s string) (lxc.LogLevel, error) {
-	switch strings.ToLower(s) {
-	case "trace":
-		return lxc.TRACE, nil
-	case "debug":
-		return lxc.DEBUG, nil
-	case "info":
-		return lxc.INFO, nil
-	case "warn":
-		return lxc.WARN, nil
-	case "error":
-		return lxc.ERROR, nil
-	default:
-		return lxc.ERROR, fmt.Errorf("Invalid log-level %s", s)
-	}
-}
-
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
