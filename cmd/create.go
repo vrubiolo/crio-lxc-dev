@@ -85,17 +85,6 @@ func createInitSpec(spec *specs.Spec) error {
 		Options:     []string{"bind", "ro"},
 	})
 
-	if err := api.WriteSpec(spec, clxc.RuntimePath(api.INIT_SPEC)); err != nil {
-		return errors.Wrapf(err, "failed to write init spec")
-	}
-
-	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.RuntimePath(api.INIT_SPEC),
-		Destination: strings.Trim(api.INIT_SPEC, "/"),
-		Type:        "bind",
-		Options:     []string{"bind", "ro"},
-	})
-
 	if err := clxc.SetConfigItem("lxc.hook.mount", clxc.HookCommand); err != nil {
 		return err
 	}
@@ -776,6 +765,11 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 	if err := saveConfig(ctx, c, configFilePath); err != nil {
 		return err
 	}
+
+	if err := api.WriteSpec(spec, clxc.RuntimePath(api.INIT_SPEC)); err != nil {
+		return errors.Wrapf(err, "failed to write init spec")
+	}
+
 	err := cmd.Start()
 	if err != nil {
 		return err

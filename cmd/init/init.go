@@ -18,7 +18,7 @@ func main() {
 		panic(err)
 	}
 
-	fifo, err := os.OpenFile(clxc.SYNC_FIFO, os.O_WRONLY, 0)
+	fifo, err := os.OpenFile(clxc.SYNC_FIFO_PATH, os.O_WRONLY, 0)
 	if err != nil {
 		fail(err, "open sync fifo")
 	}
