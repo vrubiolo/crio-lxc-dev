@@ -113,9 +113,6 @@ func createInitSpec(spec *specs.Spec) error {
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
-	if err := api.WriteSpec(spec, clxc.RuntimePath(api.INIT_SPEC)); err != nil {
-		return errors.Wrap(err, "failed to write init spec")
-	}
 
 	// create destination file for bind mount
 	initBin := clxc.RuntimePath(api.INIT_CMD)
