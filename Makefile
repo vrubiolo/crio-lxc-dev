@@ -4,7 +4,7 @@ COMMIT=$(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_HASH)-
 TEST?=$(patsubst test/%.bats,%,$(wildcard test/*.bats))
 PACKAGES_DIR?=~/packages
 PKG_CONFIG := $(shell pkg-config --libs --cflags lxc)
-BINS := crio-lxc crio-lxc-start crio-lxc-init
+BINS := crio-lxc crio-lxc-start crio-lxc-init crio-lxc-hook
 PREFIX ?= /usr/local
 CGO_ENABLED=0 
 LDFLAGS=-s -w -X main.version=$(COMMIT)
@@ -13,10 +13,13 @@ INIT_LDFLAGS=$(LDFLAGS) -extldflags "-static"
 all: $(BINS)
 
 crio-lxc: $(GO_SRC) Makefile go.mod
-	go build -ldflags '$(LDFLAGS)' -o crio-lxc ./cmd
+	go build -ldflags '$(LDFLAGS)' -o $@ ./cmd
 
 crio-lxc-init: $(GO_SRC) Makefile go.mod
-	go build -ldflags '$(INIT_LDFLAGS)' -o crio-lxc-init ./cmd/init
+	go build -ldflags '$(INIT_LDFLAGS)' -o $@ ./cmd/init
+
+crio-lxc-hook: $(GO_SRC) Makefile go.mod
+	go build -ldflags '$(INIT_LDFLAGS)' -o $@ ./cmd/hook
 
 crio-lxc-start: cmd/start/crio-lxc-start.c
 	gcc $? $(PKG_CONFIG) -o $@

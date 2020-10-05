@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"os"
@@ -10,27 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
 	ldd "github.com/u-root/u-root/pkg/ldd"
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
-
-func readBundleSpec(specFilePath string) (spec *specs.Spec, err error) {
-	specFile, err := os.Open(specFilePath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to open spec file '%s'", specFilePath)
-	}
-	defer specFile.Close()
-	err = json.NewDecoder(specFile).Decode(&spec)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to decode spec file")
-	}
-
-	return spec, nil
-}
 
 func parseLogLevel(s string) (lxc.LogLevel, error) {
 	switch strings.ToLower(s) {

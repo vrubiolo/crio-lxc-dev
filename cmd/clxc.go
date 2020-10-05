@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	api "github.com/lxc/crio-lxc/clxc"
 	"github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
 )
@@ -30,6 +31,7 @@ type CrioLXC struct {
 	SystemdCgroup  bool
 	StartCommand   string
 	InitCommand    string
+	HookCommand    string
 	BundlePath     string
 	SpecPath       string
 }
@@ -174,7 +176,7 @@ func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
 		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
 	}
 	// remove syncfifo because it is not of any use and blocks 'grep' within the backup directory.
-	os.Remove(filepath.Join(backupDir, SYNC_FIFO_PATH))
+	os.Remove(filepath.Join(backupDir, api.SYNC_FIFO_PATH))
 	err = RunCommand("cp", clxc.SpecPath, backupDir)
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")

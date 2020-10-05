@@ -13,25 +13,31 @@ import (
 	"strings"
 )
 
-// TODO default spec path here
+const (
+	// CFG_DIR is bind mounted (readonly) to container
+	CFG_DIR           = "/.crio-lxc"
+	SYNC_FIFO         = "/syncfifo"
+	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
+	SYNC_FIFO_CONTENT = "meshuggah rocks"
+	INIT_CMD          = CFG_DIR + "/init"
+	INIT_SPEC         = CFG_DIR + "/spec.json"
+)
 
-type InitSpec struct {
-	*specs.Spec
-
-	SyncFifo string // path to syncfifo
-	Message  string // message send to syncfifo
-}
-
-func (spec *InitSpec) ParseFile(specFilePath string) error {
+func ReadSpec(specFilePath string) (*specs.Spec, error) {
 	specFile, err := os.Open(specFilePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer specFile.Close()
-	return json.NewDecoder(specFile).Decode(&spec)
+	spec := &specs.Spec{}
+	err = json.NewDecoder(specFile).Decode(spec)
+	if err != nil {
+		return nil, err
+	}
+	return spec, nil
 }
 
-func (spec *InitSpec) WriteFile(specFilePath string) error {
+func WriteSpec(spec *specs.Spec, specFilePath string) error {
 	f, err := os.OpenFile(specFilePath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0555)
 	if err != nil {
 		return err
@@ -116,4 +122,15 @@ func CreateDevice(spec *specs.Spec, dev specs.LinuxDevice) error {
 		return fmt.Errorf("chown failed: %s", err)
 	}
 	return nil
+}
+
+func MaskPath(p string) error {
+	err := unix.Mount("/dev/null", p, "", unix.MS_BIND, "")
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err == unix.ENOTDIR {
+		return unix.Mount("tmpfs", p, "tmpfs", unix.MS_RDONLY, "")
+	}
+	return err
 }

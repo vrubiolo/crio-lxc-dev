@@ -13,23 +13,22 @@ func fail(err error, step string) {
 }
 
 func main() {
-	var spec clxc.InitSpec
-	err := spec.ParseFile(os.Args[1])
+	spec, err := clxc.ReadSpec(clxc.INIT_SPEC)
 	if err != nil {
 		panic(err)
 	}
 
-	fifo, err := os.OpenFile(spec.SyncFifo, os.O_WRONLY, 0)
+	fifo, err := os.OpenFile(clxc.SYNC_FIFO, os.O_WRONLY, 0)
 	if err != nil {
 		fail(err, "open sync fifo")
 	}
 
-	_, err = fifo.Write([]byte(spec.Message))
+	_, err = fifo.Write([]byte(clxc.SYNC_FIFO_CONTENT))
 	if err != nil {
 		fail(err, "write to sync fifo")
 	}
 
-	if clxc.HasCapability(spec.Spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {
+	if clxc.HasCapability(spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {
 		gids := make([]int, len(spec.Process.User.AdditionalGids))
 		for _, gid := range spec.Process.User.AdditionalGids {
 			gids = append(gids, int(gid))
@@ -38,11 +37,6 @@ func main() {
 		if err != nil {
 			fail(err, "setgroups")
 		}
-	}
-
-	err = clxc.CreateDevices(spec.Spec)
-	if err != nil {
-		fail(err, "create devices")
 	}
 
 	env := setHome(spec.Process.Env, spec.Process.User.Username, spec.Process.Cwd)

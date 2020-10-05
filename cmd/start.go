@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	api "github.com/lxc/crio-lxc/clxc"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"time"
@@ -27,7 +28,7 @@ starts <containerID>
 }
 
 func doStart(ctx *cli.Context) error {
-	fifoPath := clxc.RuntimePath(SYNC_FIFO_PATH)
+	fifoPath := clxc.RuntimePath(api.SYNC_FIFO_PATH)
 	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	log.Debug().Err(err).Str("fifo", fifoPath).Msg("open fifo")
 	if err != nil {
@@ -38,12 +39,12 @@ func doStart(ctx *cli.Context) error {
 	done := make(chan error)
 
 	go func() {
-		data := make([]byte, len(SYNC_FIFO_CONTENT))
+		data := make([]byte, len(api.SYNC_FIFO_CONTENT))
 		n, err := f.Read(data)
 		if err != nil {
 			done <- errors.Wrapf(err, "problem reading from fifo")
 		}
-		if n != len(SYNC_FIFO_CONTENT) || string(data) != SYNC_FIFO_CONTENT {
+		if n != len(api.SYNC_FIFO_CONTENT) || string(data) != api.SYNC_FIFO_CONTENT {
 			done <- errors.Errorf("bad fifo content: %s", string(data))
 		}
 		done <- nil

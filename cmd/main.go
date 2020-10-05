@@ -94,6 +94,13 @@ func main() {
 			Value:       "crio-lxc-start",
 			Destination: &clxc.StartCommand,
 		},
+		&cli.StringFlag{
+			Name:        "cmd-hook",
+			Usage:       "Name or path to container hook binary (crio-lxc-hook)",
+			EnvVars:     []string{"CRIO_LXC_CMD_HOOK"},
+			Value:       "crio-lxc-hook",
+			Destination: &clxc.HookCommand,
+		},
 	}
 
 	app.Before = func(ctx *cli.Context) error {

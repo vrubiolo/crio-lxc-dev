@@ -62,39 +62,43 @@ var NamespaceMap = map[string]string{
 	"uts":     "uts",
 }
 
-const (
-	// CFG_DIR is bind mounted (readonly) to container
-	CFG_DIR           = "/.crio-lxc"
-	SYNC_FIFO         = "/syncfifo"
-	SYNC_FIFO_PATH    = CFG_DIR + SYNC_FIFO
-	SYNC_FIFO_CONTENT = "meshuggah rocks"
-	INIT_CMD          = CFG_DIR + "/init"
-	INIT_SPEC         = CFG_DIR + "/spec.json"
-	//BUSYBOX_BIN       = CFG_DIR + "/busybox"
-)
-
 func createInitSpec(spec *specs.Spec) error {
 
-	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, CFG_DIR))
+	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, api.CFG_DIR))
 	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in rootfs", CFG_DIR)
+		return errors.Wrapf(err, "Failed creating %s in rootfs", api.CFG_DIR)
 	}
-	err = RunCommand("mkdir", "-p", "-m", "0755", clxc.RuntimePath(CFG_DIR))
+	err = RunCommand("mkdir", "-p", "-m", "0755", clxc.RuntimePath(api.CFG_DIR))
 	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in lxc container dir", CFG_DIR)
+		return errors.Wrapf(err, "Failed creating %s in lxc container dir", api.CFG_DIR)
 	}
 
 	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(clxc.RuntimePath(SYNC_FIFO_PATH)); err != nil {
+	if err := makeSyncFifo(clxc.RuntimePath(api.SYNC_FIFO_PATH)); err != nil {
 		return errors.Wrapf(err, "failed to make sync fifo")
 	}
 
 	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.RuntimePath(CFG_DIR),
-		Destination: strings.Trim(CFG_DIR, "/"),
+		Source:      clxc.RuntimePath(api.CFG_DIR),
+		Destination: strings.Trim(api.CFG_DIR, "/"),
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
+
+	if err := api.WriteSpec(spec, clxc.RuntimePath(api.INIT_SPEC)); err != nil {
+		return errors.Wrapf(err, "failed to write init spec")
+	}
+
+	spec.Mounts = append(spec.Mounts, specs.Mount{
+		Source:      clxc.RuntimePath(api.INIT_SPEC),
+		Destination: strings.Trim(api.INIT_SPEC, "/"),
+		Type:        "bind",
+		Options:     []string{"bind", "ro"},
+	})
+
+	if err := clxc.SetConfigItem("lxc.hook.autodev", clxc.HookCommand); err != nil {
+		return err
+	}
 
 	path := "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	for _, kv := range spec.Process.Env {
@@ -109,28 +113,23 @@ func createInitSpec(spec *specs.Spec) error {
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
-	var initSpec = api.InitSpec{
-		SyncFifo: SYNC_FIFO_PATH,
-		Message:  SYNC_FIFO_CONTENT, // FIXME use the container ID instead ?
-		Spec:     spec,
-	}
-	if err := initSpec.WriteFile(clxc.RuntimePath(INIT_SPEC)); err != nil {
+	if err := api.WriteSpec(spec, clxc.RuntimePath(api.INIT_SPEC)); err != nil {
 		return errors.Wrap(err, "failed to write init spec")
 	}
 
 	// create destination file for bind mount
-	busyboxBinDest := clxc.RuntimePath(INIT_CMD)
+	busyboxBinDest := clxc.RuntimePath(api.INIT_CMD)
 	err = touchFile(busyboxBinDest, 0750)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
 	}
 	spec.Mounts = append(spec.Mounts, specs.Mount{
 		Source:      clxc.InitCommand,
-		Destination: INIT_CMD,
+		Destination: api.INIT_CMD,
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
-	return clxc.SetConfigItem("lxc.init.cmd", fmt.Sprintf("%s %s", INIT_CMD, INIT_SPEC))
+	return clxc.SetConfigItem("lxc.init.cmd", fmt.Sprintf("%s %s", api.INIT_CMD, api.INIT_SPEC))
 }
 
 // TODO ensure network and user namespace are shared together (why ?
@@ -219,7 +218,7 @@ func doCreateInternal(ctx *cli.Context) error {
 	}
 
 	clxc.SpecPath = filepath.Join(clxc.BundlePath, "config.json")
-	spec, err := readBundleSpec(clxc.SpecPath)
+	spec, err := api.ReadSpec(clxc.SpecPath)
 	if err != nil {
 		return errors.Wrap(err, "couldn't load bundle spec")
 	}
@@ -595,20 +594,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		rootmnt = item[0]
 	}
 
-	// LXC does not yet implement masking paths see https://github.com/lxc/lxc/issues/2282
-	for _, p := range spec.Linux.MaskedPaths {
-		// see https://github.com/opencontainers/runc/blob/64416d34f30eaf69af6938621137b393ada63a16/libcontainer/container_linux.go#L855
-		// Existing files are masked with the hosts null device /dev/null
-		// If the path to mask is a directory we make it readonly instead, since
-		// The `optional` mount option is set to let lxc skip over invalid / inaccessible paths.
-
-		// TODO masking paths only works if destination is a file
-		// Can apparmor be used to mask paths instead ?
-		mnt := fmt.Sprintf("%s %s %s %s", "/dev/null", strings.TrimLeft(p, "/"), "none", "bind,optional")
-		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-			return errors.Wrap(err, "failed to mask path")
-		}
-	}
 	// lxc handles read-only remount automatically, so no need for an additional remount entry
 	for _, p := range spec.Linux.ReadonlyPaths {
 		src := filepath.Join(rootmnt, p)
