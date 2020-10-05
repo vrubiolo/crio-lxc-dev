@@ -3,27 +3,13 @@ package main
 import (
 	"github.com/lxc/crio-lxc/clxc"
 	"golang.org/x/sys/unix"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
 )
 
-type initError struct {
-	err  error
-	step string
-}
-
-func (e initError) Error() string {
-	return "failed to:" + e.step + ":" + e.err.Error()
-}
-
 func fail(err error, step string) {
-	// TODO write termination message ?
-	// create a custom error ?
-	e := initError{err, step}
-	ioutil.WriteFile("/dev/termination-log", []byte(e.Error()), 0640)
-	panic(e)
+	panic("init step [" + step + "] failed: " + err.Error())
 }
 
 func main() {
@@ -40,7 +26,7 @@ func main() {
 
 	_, err = fifo.Write([]byte(spec.Message))
 	if err != nil {
-		fail(err, "write message to sync fifo")
+		fail(err, "write to sync fifo")
 	}
 
 	if clxc.HasCapability(spec.Spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {

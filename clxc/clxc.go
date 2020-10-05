@@ -9,6 +9,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -94,6 +95,9 @@ func CreateDevice(spec *specs.Spec, dev specs.LinuxDevice) error {
 	if devType == unix.S_IFBLK || devType == unix.S_IFCHR {
 		devMode = int(unix.Mkdev(uint32(dev.Major), uint32(dev.Minor)))
 	}
+
+	os.MkdirAll(filepath.Dir(dev.Path), 0755)
+
 	err := unix.Mknod(dev.Path, mode, devMode)
 	if err != nil {
 		return fmt.Errorf("mknod failed: %s", err)
