@@ -118,10 +118,10 @@ func createInitSpec(spec *specs.Spec) error {
 	}
 
 	// create destination file for bind mount
-	busyboxBinDest := clxc.RuntimePath(api.INIT_CMD)
-	err = touchFile(busyboxBinDest, 0750)
+	initBin := clxc.RuntimePath(api.INIT_CMD)
+	err = touchFile(initBin, 0750)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create %s", busyboxBinDest)
+		return errors.Wrapf(err, "failed to create %s", initBin)
 	}
 	spec.Mounts = append(spec.Mounts, specs.Mount{
 		Source:      clxc.InitCommand,
@@ -129,7 +129,7 @@ func createInitSpec(spec *specs.Spec) error {
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
-	return clxc.SetConfigItem("lxc.init.cmd", fmt.Sprintf("%s %s", api.INIT_CMD, api.INIT_SPEC))
+	return clxc.SetConfigItem("lxc.init.cmd", api.INIT_CMD)
 }
 
 // TODO ensure network and user namespace are shared together (why ?
@@ -537,7 +537,9 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	}
 
 	// write init spec
-	createInitSpec(spec)
+	if err := createInitSpec(spec); err != nil {
+		return err
+	}
 
 	// excplicitly disable auto-mounting
 	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
