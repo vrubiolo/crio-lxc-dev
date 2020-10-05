@@ -96,7 +96,7 @@ func createInitSpec(spec *specs.Spec) error {
 		Options:     []string{"bind", "ro"},
 	})
 
-	if err := clxc.SetConfigItem("lxc.hook.autodev", clxc.HookCommand); err != nil {
+	if err := clxc.SetConfigItem("lxc.hook.mount", clxc.HookCommand); err != nil {
 		return err
 	}
 

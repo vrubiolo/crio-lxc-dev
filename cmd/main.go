@@ -98,7 +98,7 @@ func main() {
 			Name:        "cmd-hook",
 			Usage:       "Name or path to container hook binary (crio-lxc-hook)",
 			EnvVars:     []string{"CRIO_LXC_CMD_HOOK"},
-			Value:       "crio-lxc-hook",
+			Value:       "/usr/local/bin/crio-lxc-hook",
 			Destination: &clxc.HookCommand,
 		},
 	}
