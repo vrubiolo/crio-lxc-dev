@@ -82,9 +82,9 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:        "cmd-init",
-			Usage:       "Name or path to container init binary (crio-lxc-init)",
+			Usage:       "Absolute path to container init binary (crio-lxc-init)",
 			EnvVars:     []string{"CRIO_LXC_CMD_INIT"},
-			Value:       "crio-lxc-init",
+			Value:       "/usr/local/bin/crio-lxc-init",
 			Destination: &clxc.InitCommand,
 		},
 		&cli.StringFlag{

@@ -170,22 +170,7 @@ func checkRuntime(ctx *cli.Context) error {
 	if !lxc.VersionAtLeast(3, 1, 0) {
 		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
 	}
-	if err := isStaticBinary(ctx.String("busybox-static")); err != nil {
-		return err
-	}
 	return nil
-}
-
-func isStaticBinary(binPath string) error {
-	libs, err := ldd.Ldd([]string{binPath})
-	if err != nil {
-		return err
-	}
-
-	if len(libs) == 1 {
-		return nil
-	}
-	return fmt.Errorf("%s is not a static binary", binPath)
 }
 
 // runtimeHasCapabilitySupport checks whether he given runtime binary is linked against libcap.so.
