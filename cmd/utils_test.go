@@ -1,13 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -74,38 +71,6 @@ func TestResolveMountDestinationRelative(t *testing.T) {
 	require.Error(t, err, os.ErrExist)
 }
 
-func TestEmitCommandFile(t *testing.T) {
-	t.Skip("must be fixed")
-	cmd := exec.Command("/bin/sh", "-c", "echo foo\n echo bar\n")
-	cmd.Stdout = os.Stdout
-	err := cmd.Run()
-	if err != nil {
-		panic(err)
-	}
-	specFile := "/tmp/crio-lxc.log.582641.config.json"
-
-	spec, err := readBundleSpec(specFile)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := strings.Builder{}
-	buf.WriteString("exec")
-	for _, arg := range spec.Process.Args {
-		buf.WriteRune(' ')
-		buf.WriteRune('"')
-		//fmt.Fprintf(&buf, "%s", arg)
-		buf.WriteString(arg)
-		buf.WriteRune('"')
-	}
-	fmt.Println(buf.String())
-}
-
-func TestIsStaticBinary(t *testing.T) {
-	require.NoError(t, isStaticBinary("/bin/zcat"))
-	require.Error(t, isStaticBinary("/usr/bin/systemd"))
-}
-
 func TestCapabilities(t *testing.T) {
 	require.NoError(t, runtimeHasCapabilitySupport("/usr/local/bin/crio-lxc-start"))
 	require.Error(t, runtimeHasCapabilitySupport("/bin/zcat"))
@@ -126,6 +91,7 @@ func TestKernelRelease(t *testing.T) {
 	require.Empty(t, r.Suffix)
 }
 
+/*
 func TestGetUser(t *testing.T) {
 	passwd := `root:x:0:0:root:/root:/bin/bash
 _apt:x:100:65534:xxx:/nonexistent:/usr/sbin/nologin
@@ -149,6 +115,7 @@ systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin`
 	require.NotNil(t, u)
 	require.Equal(t, "/root", u.Home)
 }
+*/
 
 func TestAccessMask(t *testing.T) {
 	// setuid 4, setgid 2, sticky 1
@@ -162,4 +129,10 @@ func TestAccessMask(t *testing.T) {
 	require.Equal(t, "5777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetuid))
 	require.Equal(t, "6777", accessMask(os.ModePerm|os.ModeSetgid|os.ModeSetuid))
 	require.Equal(t, "7777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid|os.ModeSetuid))
+}
+
+func TestCompileCgroupsPath(t *testing.T) {
+	s := "kubepods-burstable-123.slice:crio:ABC"
+	cg := ParseCgroupsPath(s)
+	require.Equal(t, "kubepods.slice/kubepods-burstable.slice/kubepods-burstable-123.slice/crio-ABC.scope", cg.String())
 }

@@ -363,9 +363,17 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
 
 	if linux.CgroupsPath != "" {
-		if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
+		cgPath := linux.CgroupsPath
+		if clxc.SystemdCgroup {
+			cgPath = ParseCgroupsPath(linux.CgroupsPath).String()
+		}
+		if err := clxc.SetConfigItem("lxc.cgroup.dir", cgPath); err != nil {
 			return err
 		}
+	}
+	// cgroup already exists ( created by crio )
+	if err := clxc.SetConfigItem("lxc.cgroup.relative", "0"); err != nil {
+		return err
 	}
 
 	if err := ensureDefaultDevices(spec); err != nil {
@@ -774,7 +782,6 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 	if err != nil {
 		return err
 	}
-	//cmd.Process.Release()
 
 	log.Debug().Msg("waiting for PID file")
 	pidfile := ctx.String("pid-file")
