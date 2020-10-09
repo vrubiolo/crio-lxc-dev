@@ -47,3 +47,6 @@ vendorup:
 .PHONY: clean
 clean:
 	-rm -f $(BINS)
+
+fmt:
+	go fmt ./...
