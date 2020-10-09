@@ -131,8 +131,8 @@ func TestAccessMask(t *testing.T) {
 	require.Equal(t, "7777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid|os.ModeSetuid))
 }
 
-func TestCompileCgroupsPath(t *testing.T) {
+func TestParseSystemCgroupPath(t *testing.T) {
 	s := "kubepods-burstable-123.slice:crio:ABC"
-	cg := ParseCgroupsPath(s)
+	cg := ParseSystemdCgroupPath(s)
 	require.Equal(t, "kubepods.slice/kubepods-burstable.slice/kubepods-burstable-123.slice/crio-ABC.scope", cg.String())
 }

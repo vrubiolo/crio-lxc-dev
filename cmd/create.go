@@ -360,17 +360,31 @@ func ensureDefaultDevices(spec *specs.Spec) error {
 func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	linux := spec.Linux
 
-	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
-
 	if linux.CgroupsPath != "" {
-		cgPath := linux.CgroupsPath
 		if clxc.SystemdCgroup {
-			cgPath = ParseCgroupsPath(linux.CgroupsPath).String()
-		}
-		if err := clxc.SetConfigItem("lxc.cgroup.dir", cgPath); err != nil {
-			return err
+			cgPath := ParseSystemdCgroupPath(linux.CgroupsPath)
+			// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
+			// checking for on of the config items shuld be enough, because they were introduced together ...
+			if lxc.IsSupportedConfigItem("lxc.cgroup.dir.container") && lxc.IsSupportedConfigItem("lxc.cgroup.dir.monitor") {
+				if err := clxc.SetConfigItem("lxc.cgroup.dir.container", cgPath.String()); err != nil {
+					return err
+				}
+				if err := clxc.SetConfigItem("lxc.cgroup.dir.monitor", filepath.Join(clxc.MonitorCgroup, c.Name()+".scope")); err != nil {
+					return err
+				}
+			} else {
+				if err := clxc.SetConfigItem("lxc.cgroup.dir", cgPath.String()); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
+				return err
+			}
 		}
 	}
+
+	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
 	// cgroup already exists ( created by crio )
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "0"); err != nil {
 		return err

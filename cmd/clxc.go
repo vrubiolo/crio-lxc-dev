@@ -29,6 +29,7 @@ type CrioLXC struct {
 	Backup         bool
 	BackupOnError  bool
 	SystemdCgroup  bool
+	MonitorCgroup  string
 	StartCommand   string
 	InitCommand    string
 	HookCommand    string

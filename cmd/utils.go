@@ -246,12 +246,12 @@ func touchFile(filePath string, perm os.FileMode) error {
 
 // https://kubernetes.io/docs/setup/production-environment/container-runtimes/
 // kubelet --cgroup-driver systemd --cgroups-per-qos
-type CgroupsPath struct {
+type CgroupPath struct {
 	Slices []string
 	Scope  string
 }
 
-func (cg CgroupsPath) String() string {
+func (cg CgroupPath) String() string {
 	return filepath.Join(append(cg.Slices, cg.Scope)...)
 }
 
@@ -259,18 +259,17 @@ func (cg CgroupsPath) String() string {
 // kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod87f8bc68_7c18_4a1d_af9f_54eff815f688.slice
 // kubepods-burstable-pod9da3b2a14682e1fb23be3c2492753207.slice:crio:fe018d944f87b227b3b7f86226962639020e99eac8991463bf7126ef8e929589
 // https://github.com/cri-o/cri-o/issues/2632
-func ParseCgroupsPath(s string) (cg CgroupsPath) {
+func ParseSystemdCgroupPath(s string) (cg CgroupPath) {
 	if s == "" {
 		return cg
 	}
 	parts := strings.Split(s, ":")
 
-// {base}-{qos}-{pod}
 	slices := parts[0]
 	fmt.Printf("%s", slices)
 	for i, r := range slices {
 		if r == '-' && i > 0 {
-			slice := slices[0 : i] + ".slice" 
+			slice := slices[0:i] + ".slice"
 			cg.Slices = append(cg.Slices, slice)
 		}
 	}

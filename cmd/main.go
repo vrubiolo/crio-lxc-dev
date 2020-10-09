@@ -34,7 +34,7 @@ func main() {
 			Name:        "log-level",
 			Usage:       "set log level (trace|debug|info|warn|error)",
 			EnvVars:     []string{"CRIO_LXC_LOG_LEVEL"},
-			Value:       "error",
+			Value:       "info",
 			Destination: &clxc.LogLevelString,
 		},
 		&cli.StringFlag{
@@ -79,6 +79,12 @@ func main() {
 			Name:        "systemd-cgroup",
 			Usage:       "enable systemd cgroup",
 			Destination: &clxc.SystemdCgroup,
+		},
+		&cli.StringFlag{
+			Name:        "monitor-cgroup",
+			Usage:       "cgroup for LXC monitor processes",
+			Destination: &clxc.MonitorCgroup,
+			Value:       "crio-lxc-monitor.slice",
 		},
 		&cli.StringFlag{
 			Name:        "cmd-init",
