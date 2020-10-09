@@ -6,9 +6,12 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -110,16 +113,73 @@ func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	return pid, proc, nil
 }
 
+// getCgroupProcs returns the PIDs for all processes which are in the
+// same control group as the process for which the PID is given.
+func getCgroupProcs(pid int) ([]int, error) {
+	procCgroup := fmt.Sprintf("/proc/%d/cgroup", pid)
+
+	data, err := ioutil.ReadFile(procCgroup)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read %s", procCgroup)
+	}
+	// see 'man 7 cgroups #/proc files'
+	// for cgroup2 unified hierarchy the format is '0::{path relative to cgroup mount}'
+	parts := strings.SplitN(string(data), ":", 3)
+	if len(parts) != 3 {
+		return nil, errors.Wrapf(err, "unsupported proc cgroup format: %s", data)
+	}
+	if parts[0] != "0" {
+		return nil, fmt.Errorf("expected cgroups 2 identifier in cgroup file: %s", data)
+	}
+
+	cgroupPath := strings.TrimSpace(parts[2])
+	cgroupProcsPath := filepath.Join("/sys/fs/cgroup", cgroupPath, "cgroup.procs")
+	log.Debug().Str("path:", cgroupProcsPath).Msg("reading control group process list")
+	procsData, err := ioutil.ReadFile(cgroupProcsPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
+	}
+	// cgroup.procs contains one PID per line and is newline separated.
+	// A trailing newline is always present.
+	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
+	if len(pidStrings) == 0 {
+		log.Warn().Msg("cgroup.procs is empty - it should contain at least the init process PID?")
+		return nil, nil
+	}
+
+	pids := make([]int, 0, len(pidStrings))
+	for _, s := range pidStrings {
+		pid, err := strconv.Atoi(s)
+		if err != nil {
+			// reading garbage from cgroup.procs should not happen
+			return nil, errors.Wrapf(err, "failed to convert PID %q to number", s)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
 func killContainer(c *lxc.Container, signum unix.Signal) error {
-	pid, proc, err := safeGetInitPid(c)
+	// freeze the container to get a 'stable' view of the cgroup processes
+	err := c.Freeze()
+	if err != nil {
+		return errors.Wrap(err, "failed to freeze container")
+	}
+	defer c.Unfreeze()
+	pid := c.InitPid()
+	if pid < 1 {
+		return fmt.Errorf("expected init pid > 0, but was %d", pid)
+	}
+	log.Debug().Int("pid:", pid).Msg("container init PID")
+	pids, err := getCgroupProcs(pid)
 	if err != nil {
 		return err
 	}
-	if proc != nil {
-		defer proc.Close()
-	}
-	if err := unix.Kill(pid, signum); err != nil {
-		return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+	log.Debug().Ints("pids:", pids).Str("sig:", signum.String()).Msg("killing container processes")
+	for _, pid := range pids {
+		if err := unix.Kill(pid, signum); err != nil {
+			return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+		}
 	}
 	return nil
 }
@@ -152,7 +212,7 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 func doKill(ctx *cli.Context) error {
 	err := clxc.LoadContainer()
 	if err != nil {
-		return errors.Wrap(err, "failed to load contaienr")
+		return errors.Wrap(err, "failed to load container")
 	}
 
 	if !clxc.Container.Running() {
@@ -184,5 +244,5 @@ func doKill(ctx *cli.Context) error {
 	*/
 	return killContainer(clxc.Container, signum)
 	//}
-	return nil
+	//return nil
 }
