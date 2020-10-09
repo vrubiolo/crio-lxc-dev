@@ -160,12 +160,13 @@ func getCgroupProcs(pid int) ([]int, error) {
 }
 
 func killContainer(c *lxc.Container, signum unix.Signal) error {
-	// freeze the container to get a 'stable' view of the cgroup processes
+	// try to freeze the container to get a 'stable' view of the cgroup processes
 	err := c.Freeze()
 	if err != nil {
-		return errors.Wrap(err, "failed to freeze container")
+		log.Warn().Msg("failed to freeze container")
+	} else {
+		defer c.Unfreeze()
 	}
-	defer c.Unfreeze()
 	pid := c.InitPid()
 	if pid < 1 {
 		return fmt.Errorf("expected init pid > 0, but was %d", pid)
