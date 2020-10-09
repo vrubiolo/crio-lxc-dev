@@ -111,6 +111,10 @@ func (c CrioLXC) Release() {
 	}
 }
 
+//2020 10 08 14 25 13.908
+//   RFC3339     = "2006-01-02T15:04:05Z07:00"
+var TimeFormatLXCMillis = "20060102150405.000"
+
 // By default logging is done on a container base
 // log-dir /lxc-path/{container id}/{lxc.log, crio-lxc.log}
 func (c *CrioLXC) configureLogging() error {
@@ -125,7 +129,16 @@ func (c *CrioLXC) configureLogging() error {
 		return errors.Wrapf(err, "failed to open log file %s", c.LogFilePath)
 	}
 	c.LogFile = f
-	log = zerolog.New(f).With().Str("cmd:", c.Command).Str("cid:", c.ContainerID).Logger()
+
+	zerolog.TimestampFieldName = "t"
+	zerolog.LevelFieldName = "p"
+	zerolog.MessageFieldName = "m"
+	zerolog.TimeFieldFormat = TimeFormatLXCMillis
+
+	// It's not possible change the possition of the timestamp.
+	// The ttimestamp is appended to the to the log output because it is dynamically rendered
+	// see https://github.com/rs/zerolog/issues/109
+	log = zerolog.New(f).With().Timestamp().Str("cmd:", c.Command).Str("cid:", c.ContainerID).Logger()
 
 	level, err := parseLogLevel(c.LogLevelString)
 	if err != nil {
