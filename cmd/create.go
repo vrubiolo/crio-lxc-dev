@@ -256,12 +256,6 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		return err
 	}
 
-	for _, gid := range spec.Process.User.AdditionalGids {
-		if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", gid)); err != nil {
-			return err
-		}
-	}
-
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
