@@ -1,16 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"net"
-	"time"
-
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/creack/pty"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -216,6 +217,73 @@ func doCreateInternal(ctx *cli.Context) error {
 	return startContainer(ctx, c, spec, ctx.Duration("timeout"))
 }
 
+var seccompAction = map[specs.LinuxSeccompAction]string{
+	specs.ActKill:  "kill",
+	specs.ActTrap:  "trap",
+	specs.ActErrno: "errno",
+	specs.ActAllow: "allow",
+	//specs.ActTrace: "trace",
+	//specs.ActLog: "log",
+	//specs.ActKillProcess: "kill_process",
+}
+
+func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
+	for _, name := range sc.Names {
+		action, ok := seccompAction[sc.Action]
+		if !ok {
+			return fmt.Errorf("unsupported seccomp action: %s", sc.Action)
+		}
+		if len(sc.Args) == 0 {
+			fmt.Fprintf(w, "%s %s\n", name, action)
+		} else {
+			for _, arg := range sc.Args {
+				fmt.Fprintf(w, "%s %s [%d,%d,%s,%d]\n", name, action, arg.Index, arg.Value, arg.Op, arg.ValueTwo)
+				//fmt.Fprintf(w, "%s %s [%d,%d,%s]\n", name, action, arg.Index, arg.Value, arg.Op)
+			}
+		}
+	}
+	return nil
+}
+
+func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
+	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)
+	if err != nil {
+		return err
+	}
+	defer profile.Close()
+
+	defer profile.Close()
+	w := bufio.NewWriter(profile)
+	w.WriteString("2\nallowlist ")
+	switch seccomp.DefaultAction {
+	case specs.ActKill:
+		w.WriteString("kill")
+	case specs.ActTrap:
+		w.WriteString("trap")
+	case specs.ActErrno:
+		w.WriteString("errno 0")
+	case specs.ActAllow:
+		w.WriteString("allow")
+		//case specs.ActTrace: w.Write("trace")
+		//case specs.ActLog: w.Write("log")
+		//case specs.ActKillProcess: w.Write("kill")
+	}
+	w.WriteRune('\n')
+
+	for _, arch := range seccomp.Architectures {
+		w.WriteRune('[')
+		w.WriteString(strings.TrimLeft(string(arch), "SCMP_ARCH_"))
+		w.WriteString("]\n")
+		for _, sc := range seccomp.Syscalls {
+			if err := writeSeccompSyscall(w, sc); err != nil {
+				return err
+			}
+		}
+	}
+	w.WriteRune('\n')
+	return nil
+}
+
 func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	// Crio sets the apparmor profile from the container spec.
 	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
@@ -235,6 +303,19 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+			return err
+		}
+	}
+
+	// check architecture
+	// https://github.com/lxc/lxc/blob/master/doc/examples/seccomp-v2.conf
+	//"denylist" | "allowlist"
+	if spec.Linux.Seccomp != nil {
+		profilePath := clxc.RuntimePath("seccomp.conf")
+		if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
+			return err
+		}
+		if err := clxc.SetConfigItem("lxc.seccomp.profile", profilePath); err != nil {
 			return err
 		}
 	}
