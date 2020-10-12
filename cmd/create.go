@@ -236,13 +236,39 @@ func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
 		if len(sc.Args) == 0 {
 			fmt.Fprintf(w, "%s %s\n", name, action)
 		} else {
+			// Only write a single argument per line - this is required when the same arg.Index is used multiple times.
+			// from `man 7 seccomp_rule_add_exact_array`
+			// "When adding syscall argument comparisons to the filter it is important to remember
+			// that while it is possible to have multiple comparisons in a single rule,
+			// you can only compare each argument once in a single rule.
+			// In other words, you can not have multiple comparisons of the 3rd syscall argument in a single rule."
 			for _, arg := range sc.Args {
 				fmt.Fprintf(w, "%s %s [%d,%d,%s,%d]\n", name, action, arg.Index, arg.Value, arg.Op, arg.ValueTwo)
-				//fmt.Fprintf(w, "%s %s [%d,%d,%s]\n", name, action, arg.Index, arg.Value, arg.Op)
 			}
 		}
 	}
 	return nil
+}
+
+func defaultAction(seccomp *specs.LinuxSeccomp) (string, error) {
+	switch seccomp.DefaultAction {
+	case specs.ActKill:
+		return "kill", nil
+	case specs.ActTrap:
+		return "trap", nil
+	case specs.ActErrno:
+		return "errno 0", nil
+	case specs.ActAllow:
+		return "allow", nil
+		// Not (yet) supported by lxc
+	case specs.ActTrace:
+		fallthrough
+	case specs.ActLog:
+		fallthrough
+	//case specs.ActKillProcess: fallthrough // specs > 1.0.2
+	default:
+		return "kill", fmt.Errorf("Unsupported seccomp default action %q", seccomp.DefaultAction)
+	}
 }
 
 func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
@@ -252,35 +278,25 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 	}
 	defer profile.Close()
 
-	defer profile.Close()
 	w := bufio.NewWriter(profile)
-	w.WriteString("2\nallowlist ")
-	switch seccomp.DefaultAction {
-	case specs.ActKill:
-		w.WriteString("kill")
-	case specs.ActTrap:
-		w.WriteString("trap")
-	case specs.ActErrno:
-		w.WriteString("errno 0")
-	case specs.ActAllow:
-		w.WriteString("allow")
-		//case specs.ActTrace: w.Write("trace")
-		//case specs.ActLog: w.Write("log")
-		//case specs.ActKillProcess: w.Write("kill")
+	defer w.Flush()
+
+	w.WriteString("2\n")
+	action, err := defaultAction(seccomp)
+	if err != nil {
+		return err
 	}
-	w.WriteRune('\n')
+	fmt.Fprintf(w, "allowlist %s\n", action)
 
 	for _, arch := range seccomp.Architectures {
-		w.WriteRune('[')
-		w.WriteString(strings.TrimLeft(string(arch), "SCMP_ARCH_"))
-		w.WriteString("]\n")
+		archName := strings.TrimLeft(string(arch), "SCMP_ARCH_")
+		fmt.Fprintf(w, "[%s]\n", archName)
 		for _, sc := range seccomp.Syscalls {
 			if err := writeSeccompSyscall(w, sc); err != nil {
 				return err
 			}
 		}
 	}
-	w.WriteRune('\n')
 	return nil
 }
 
@@ -307,10 +323,7 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-	// check architecture
-	// https://github.com/lxc/lxc/blob/master/doc/examples/seccomp-v2.conf
-	//"denylist" | "allowlist"
-	if spec.Linux.Seccomp != nil {
+	if spec.Linux.Seccomp != nil && len(spec.Linux.Seccomp.Syscalls) > 0 {
 		profilePath := clxc.RuntimePath("seccomp.conf")
 		if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
 			return err
