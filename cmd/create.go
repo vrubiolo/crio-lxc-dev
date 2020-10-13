@@ -323,7 +323,7 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-	if spec.Linux.Seccomp != nil && len(spec.Linux.Seccomp.Syscalls) > 0 {
+	if clxc.Seccomp && spec.Linux.Seccomp != nil && len(spec.Linux.Seccomp.Syscalls) > 0 {
 		profilePath := clxc.RuntimePath("seccomp.conf")
 		if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
 			return err

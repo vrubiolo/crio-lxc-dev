@@ -107,6 +107,13 @@ func main() {
 			Value:       "/usr/local/bin/crio-lxc-hook",
 			Destination: &clxc.HookCommand,
 		},
+		&cli.BoolFlag{
+			Name:        "seccomp",
+			Usage:       "Generate seccomp profile for lxc from container spec",
+			Destination: &clxc.Seccomp,
+			EnvVars:     []string{"CRIO_LXC_SECCOMP"},
+			Value:       true,
+		},
 	}
 
 	app.Before = func(ctx *cli.Context) error {

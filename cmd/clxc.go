@@ -35,6 +35,7 @@ type CrioLXC struct {
 	HookCommand    string
 	BundlePath     string
 	SpecPath       string
+	Seccomp        bool
 }
 
 func (c CrioLXC) VersionString() string {
