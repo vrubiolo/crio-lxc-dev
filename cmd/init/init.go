@@ -4,6 +4,7 @@ import (
 	"github.com/lxc/crio-lxc/clxc"
 	"golang.org/x/sys/unix"
 	"os"
+	"os/user"
 	"os/exec"
 	"strings"
 )
@@ -66,12 +67,10 @@ func setHome(env []string, userName string, fallback string) []string {
 	}
 	// or lookup users home directory in passwd
 	if userName != "" {
-		passwd := "/etc/passwd"
-		if _, err := os.Stat(passwd); err == nil {
-			if u := GetUser(passwd, userName); u != nil && u.Home != "" {
-				return append(env, "HOME="+u.Home)
+	  u, err := user.Lookup(userName)
+	  if err == nil && u.HomeDir != "" {
+	    return append(env, "HOME="+u.HomeDir)
 			}
-		}
 	}
 	// and as last resort the provided fallback path is used
 	return append(env, "HOME="+fallback)
