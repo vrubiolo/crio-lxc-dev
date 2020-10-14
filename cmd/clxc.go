@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	api "github.com/lxc/crio-lxc/clxc"
 	"github.com/rs/zerolog"
@@ -197,4 +198,21 @@ func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
 		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")
 	}
 	return backupDir, nil
+}
+
+func parseLogLevel(s string) (lxc.LogLevel, error) {
+	switch strings.ToLower(s) {
+	case "trace":
+		return lxc.TRACE, nil
+	case "debug":
+		return lxc.DEBUG, nil
+	case "info":
+		return lxc.INFO, nil
+	case "warn":
+		return lxc.WARN, nil
+	case "error":
+		return lxc.ERROR, nil
+	default:
+		return lxc.ERROR, fmt.Errorf("Invalid log-level %s", s)
+	}
 }

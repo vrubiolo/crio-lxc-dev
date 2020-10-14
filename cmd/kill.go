@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -66,26 +65,6 @@ var signalMap = map[string]unix.Signal{
 	"WINCH":  unix.SIGWINCH,
 	"XCPU":   unix.SIGXCPU,
 	"XFSZ":   unix.SIGXFSZ,
-}
-
-// PidfdSendSignal uses the kernel pidfd API to send signals to process without race conditions.
-// This requires at least kernel version 5.8.0 for setns() to support pidfd descriptors.
-// see 'man 2 setns', 'man 2 pidfd_send_signal'
-func PidfdSendSignal(pidfd uintptr, signum unix.Signal) error {
-	// the runtime OS thread must be locked to safely enter namespaces.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	// setns with pidfd requires at least kernel version 5.8.0
-	err := unix.Setns(int(pidfd), unix.CLONE_NEWPID)
-	if err != nil {
-		return err
-	}
-	// pifd_send_signal was introduced in kernel version 5.3
-	_, _, e1 := unix.Syscall(unix.SYS_PIDFD_SEND_SIGNAL, pidfd, uintptr(signum), 0)
-	if e1 != 0 {
-		return e1
-	}
-	return nil
 }
 
 // Retrieve the PID from container init process safely.
@@ -207,7 +186,6 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 		return unix.SIGCONT, fmt.Errorf("signal %s does not exist", sig)
 	}
 	return signum, nil
-
 }
 
 func doKill(ctx *cli.Context) error {
@@ -225,25 +203,5 @@ func doKill(ctx *cli.Context) error {
 		return errors.Wrap(err, "invalid signal param")
 	}
 
-	/*
-		r, err := LinuxRelease()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to detect linux release: %s", err)
-		}
-
-		if err == nil && r.GreaterEqual(5, 8, 0) {
-			pidfd, err := c.InitPidFd()
-			if err != nil {
-				return err
-			}
-			defer pidfd.Close()
-			err := PidfdSendSignal(pidfd.Fd(), signum)
-			if err != nil {
-			  return errors.Wrapf((err, "pidfd_send_signal failed pidfd:%d signum:%d(%s)", pidfd, signum, signum)
-			}
-		} else {
-	*/
 	return killContainer(clxc.Container, signum)
-	//}
-	//return nil
 }

@@ -4,35 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"io/ioutil"
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/urfave/cli/v2"
-
-	ldd "github.com/u-root/u-root/pkg/ldd"
-	lxc "gopkg.in/lxc/go-lxc.v2"
 )
-
-func parseLogLevel(s string) (lxc.LogLevel, error) {
-	switch strings.ToLower(s) {
-	case "trace":
-		return lxc.TRACE, nil
-	case "debug":
-		return lxc.DEBUG, nil
-	case "info":
-		return lxc.INFO, nil
-	case "warn":
-		return lxc.WARN, nil
-	case "error":
-		return lxc.ERROR, nil
-	default:
-		return lxc.ERROR, fmt.Errorf("Invalid log-level %s", s)
-	}
-}
 
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
@@ -147,35 +126,6 @@ func createPidFile(path string, pid int) error {
 	return os.Rename(tmpName, path)
 }
 
-// checkRuntime checks runtime requirements
-// An error is returned if any runtime requirement is not met.
-func checkRuntime(ctx *cli.Context) error {
-	// TODO check in build script
-	// minimal lxc version is 3.1 https://discuss.linuxcontainers.org/t/lxc-3-1-has-been-released/3527
-	if !lxc.VersionAtLeast(3, 1, 0) {
-		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
-	}
-	return nil
-}
-
-// runtimeHasCapabilitySupport checks whether he given runtime binary is linked against libcap.so.
-// TODO liblxc should output a better error message e.g:
-// "Can not set lxc.cap.keep or lxc.cap.drop because capabilies are disabled. Please compile with --enable-capabilities"
-func runtimeHasCapabilitySupport(runtime string) error {
-	// assume runtime is dynamically linked
-	// ldd resolves libraries recursively
-	libs, err := ldd.Ldd([]string{runtime})
-	if err != nil {
-		return err
-	}
-	for _, lib := range libs {
-		if strings.HasPrefix(filepath.Base(lib.FullName), "libcap.") {
-			return nil
-		}
-	}
-	return fmt.Errorf("liblxc is not linked against libcap.so")
-}
-
 type Release struct {
 	Major      int
 	Minor      int
@@ -219,22 +169,6 @@ func LinuxRelease() (*Release, error) {
 	zi := bytes.Index(uts.Release[:], []byte{0})
 	releaseData := string(uts.Release[:zi])
 	return ParseUtsnameRelease(releaseData)
-}
-
-// accessMask returns the octal access mask required for 'chmod'
-func accessMask(mode os.FileMode) string {
-	pos1 := 0
-	if mode&os.ModeSetuid == os.ModeSetuid {
-		pos1 += 4
-	}
-	if mode&os.ModeSetgid == os.ModeSetgid {
-		pos1 += 2
-	}
-	if mode&os.ModeSticky == os.ModeSticky {
-		pos1 += 1
-	}
-
-	return fmt.Sprintf("%d%03o", pos1, mode.Perm())
 }
 
 func touchFile(filePath string, perm os.FileMode) error {

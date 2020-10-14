@@ -177,8 +177,9 @@ func doCreate(ctx *cli.Context) error {
 }
 
 func doCreateInternal(ctx *cli.Context) error {
-	if err := checkRuntime(ctx); err != nil {
-		return errors.Wrap(err, "runtime requirements check failed")
+	// minimal lxc version is 3.1 https://discuss.linuxcontainers.org/t/lxc-3-1-has-been-released/3527
+	if !lxc.VersionAtLeast(3, 1, 0) {
+		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
 	}
 
 	err := clxc.LoadContainer()
