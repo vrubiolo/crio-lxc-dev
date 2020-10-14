@@ -16,7 +16,9 @@ crio-lxc: $(GO_SRC) Makefile go.mod
 	go build -ldflags '$(LDFLAGS)' -o $@ ./cmd
 
 crio-lxc-init: $(GO_SRC) Makefile go.mod
-	go build -ldflags '$(INIT_LDFLAGS)' -o $@ ./cmd/init
+	CGO_ENABLED=0 go build -ldflags '$(INIT_LDFLAGS)' -o $@ ./cmd/init
+	# ensure that crio-lxc-init is statically compiled
+	! ldd $@  2>/dev/null
 
 crio-lxc-hook: $(GO_SRC) Makefile go.mod
 	go build -ldflags '$(INIT_LDFLAGS)' -o $@ ./cmd/hook
