@@ -84,6 +84,7 @@ func main() {
 			Name:        "monitor-cgroup",
 			Usage:       "cgroup for LXC monitor processes",
 			Destination: &clxc.MonitorCgroup,
+			EnvVars:     []string{"CRIO_LXC_MONITOR_CGROUP"},
 			Value:       "crio-lxc-monitor.slice",
 		},
 		&cli.StringFlag{
@@ -112,6 +113,20 @@ func main() {
 			Usage:       "Generate seccomp profile for lxc from container spec",
 			Destination: &clxc.Seccomp,
 			EnvVars:     []string{"CRIO_LXC_SECCOMP"},
+			Value:       true,
+		},
+		&cli.BoolFlag{
+			Name:        "capabilities",
+			Usage:       "Keep capabilities defined in container spec",
+			Destination: &clxc.Capabilities,
+			EnvVars:     []string{"CRIO_LXC_CAPABILITIES"},
+			Value:       true,
+		},
+		&cli.BoolFlag{
+			Name:        "apparmor",
+			Usage:       "Set apparmor profile defined in container spec",
+			Destination: &clxc.Apparmor,
+			EnvVars:     []string{"CRIO_LXC_APPARMOR"},
 			Value:       true,
 		},
 	}

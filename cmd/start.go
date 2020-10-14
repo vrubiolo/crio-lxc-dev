@@ -20,9 +20,10 @@ starts <containerID>
 `,
 	Flags: []cli.Flag{
 		&cli.DurationFlag{
-			Name:  "syncfifo-timeout",
-			Usage: "timeout for reading from syncfifo ",
-			Value: time.Second * 5,
+			Name:    "timeout",
+			Usage:   "timeout for reading from syncfifo ",
+			EnvVars: []string{"CRIO_LXC_TIMEOUT_START"},
+			Value:   time.Second * 5,
 		},
 	},
 }
@@ -53,7 +54,7 @@ func doStart(ctx *cli.Context) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(ctx.Duration("syncfifo-timeout")):
+	case <-time.After(ctx.Duration("timeout")):
 		return fmt.Errorf("timeout reading from syncfifo %s:", fifoPath)
 	}
 }

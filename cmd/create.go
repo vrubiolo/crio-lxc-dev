@@ -301,22 +301,16 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 	return nil
 }
 
-func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	// Crio sets the apparmor profile from the container spec.
-	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
-	aaprofile := spec.Process.ApparmorProfile
-	if aaprofile == "" {
-		aaprofile = "unconfined"
-	}
-	if err := clxc.SetConfigItem("lxc.apparmor.profile", aaprofile); err != nil {
-		return err
+func configureSeccomp(c *lxc.Container, spec *specs.Spec) error {
+	if !clxc.Seccomp {
+		return nil
 	}
 
-	if spec.Process.OOMScoreAdj != nil {
-		if err := clxc.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
-			return err
-		}
+	if spec.Linux.Seccomp == nil || len(spec.Linux.Seccomp.Syscalls) == 0 {
+		return nil
 	}
+
+	// TODO warn if seccomp is not available in liblxc
 
 	if spec.Process.NoNewPrivileges {
 		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
@@ -324,14 +318,41 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 		}
 	}
 
-	if clxc.Seccomp && spec.Linux.Seccomp != nil && len(spec.Linux.Seccomp.Syscalls) > 0 {
-		profilePath := clxc.RuntimePath("seccomp.conf")
-		if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
+	profilePath := clxc.RuntimePath("seccomp.conf")
+	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
+		return err
+	}
+
+	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
+}
+
+func configureApparmor(c *lxc.Container, spec *specs.Spec) error {
+	if !clxc.Apparmor {
+		return nil
+	}
+	// TODO warn if apparmor is not available in liblxc
+
+	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
+	aaprofile := spec.Process.ApparmorProfile
+	if aaprofile == "" {
+		aaprofile = "unconfined"
+	}
+	return clxc.SetConfigItem("lxc.apparmor.profile", aaprofile)
+}
+
+func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	if spec.Process.OOMScoreAdj != nil {
+		if err := clxc.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
 			return err
 		}
-		if err := clxc.SetConfigItem("lxc.seccomp.profile", profilePath); err != nil {
-			return err
-		}
+	}
+
+	if err := configureApparmor(c, spec); err != nil {
+		return err
+	}
+
+	if err := configureSeccomp(c, spec); err != nil {
+		return err
 	}
 
 	// Do not set "lxc.ephemeral=1" since resources not created by
@@ -368,12 +389,14 @@ func configureContainerSecurity(ctx *cli.Context, c *lxc.Container, spec *specs.
 }
 
 // configureCapabilities configures the linux capabilities / privileges granted to the container processes.
-// NOTE Capabilities support must be enabled explicitly when compiling liblxc. ( --enable-capabilities)
-// The container will not start if spec.Process.Capabilities is defined and liblxc has no capablities support.
 // See `man lxc.container.conf` lxc.cap.drop and lxc.cap.keep for details.
 // https://blog.container-solutions.com/linux-capabilities-in-practice
 // https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work
 func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
+	if !clxc.Capabilities {
+		return nil
+	}
+
 	keepCaps := "none"
 	if spec.Process.Capabilities != nil {
 		var caps []string
@@ -384,10 +407,7 @@ func configureCapabilities(ctx *cli.Context, c *lxc.Container, spec *specs.Spec)
 		keepCaps = strings.Join(caps, " ")
 	}
 
-	if err := clxc.SetConfigItem("lxc.cap.keep", keepCaps); err != nil {
-		return err
-	}
-	return nil
+	return clxc.SetConfigItem("lxc.cap.keep", keepCaps)
 }
 
 func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {

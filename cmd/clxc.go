@@ -36,7 +36,11 @@ type CrioLXC struct {
 	HookCommand    string
 	BundlePath     string
 	SpecPath       string
-	Seccomp        bool
+
+	// feature gates
+	Seccomp      bool
+	Capabilities bool
+	Apparmor     bool
 }
 
 func (c CrioLXC) VersionString() string {
