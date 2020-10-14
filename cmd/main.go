@@ -133,6 +133,14 @@ func main() {
 			return err
 		}
 
+		for _, env := range os.Environ() {
+			log.Trace().Str("env:", env).Msg("effective environment variable")
+		}
+		for _, appFlag := range app.Flags {
+			name := appFlag.Names()[0]
+			log.Trace().Str("name:", name).Str("value:", ctx.String(name)).Msg("effective cmdline flag")
+		}
+
 		log.Info().Strs("args", os.Args).Msg("run cmd")
 		return nil
 	}
@@ -154,6 +162,17 @@ func main() {
 
 	app.CommandNotFound = func(ctx *cli.Context, cmd string) {
 		fmt.Fprintf(os.Stderr, "undefined subcommand %q cmdline%s\n", cmd, os.Args)
+	}
+
+	// merge with args from cmdline ?
+	// requires a fixed config file path ?
+	envFile := "/etc/default/crio-lxc"
+	if s, isSet := os.LookupEnv("CRIO_LXC_DEFAULTS"); isSet {
+		envFile = s
+	}
+	if err := loadEnvDefaults(envFile); err != nil {
+		println(err.Error())
+		os.Exit(1)
 	}
 
 	err := app.Run(os.Args)

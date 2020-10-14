@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"io/ioutil"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -278,4 +279,37 @@ func ParseSystemdCgroupPath(s string) (cg CgroupPath) {
 		cg.Scope = strings.Join(parts[1:], "-") + ".scope"
 	}
 	return cg
+}
+
+func loadEnvDefaults(envFile string) error {
+	_, err := os.Stat(envFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return errors.Wrapf(err, "failed to stat %s", envFile)
+	}
+	data, err := ioutil.ReadFile(envFile)
+	if err != nil {
+		return errors.Wrap(err, "failed to load env file")
+	}
+	lines := strings.Split(string(data), "\n")
+	for n, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		//skip over comments and blank lines
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+		vals := strings.SplitN(trimmed, "=", 2)
+		if len(vals) != 2 {
+			return fmt.Errorf("Invalid environment variable at %s +%d", envFile, n)
+		}
+		key := strings.TrimSpace(vals[0])
+		val := strings.Trim(strings.TrimSpace(vals[1]), `"'`)
+		// existing environment variables have precedence
+		if _, exist := os.LookupEnv(key); !exist {
+			os.Setenv(key, val)
+		}
+	}
+	return nil
 }
