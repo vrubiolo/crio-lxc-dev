@@ -730,10 +730,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
-	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
-		return err
-	}
-
 	// The hostname has to be on a shared namespace
 	// when we still have the capability to do so (CAP_SYS_ADMIN)
 	// TODO  why does neither cri-o nor lxc set the hostname?
@@ -755,6 +751,18 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	// pass context information as environment variables to hook scripts
 	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
 		return err
+	}
+
+	// TODO check if uts namespace should be cloned when hostname is set
+
+	if spec.Hostname != "" {
+		if !isNamespaceEnabled(spec, specs.UTSNamespace) {
+			spec.Linux.Namespaces = append(spec.Linux.Namespaces, specs.LinuxNamespace{Type: specs.UTSNamespace})
+		}
+
+		if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
+			return err
+		}
 	}
 
 	if err := configureNamespaces(c, spec); err != nil {
