@@ -733,7 +733,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	if spec.Hostname != "" {
 		for _, ns := range spec.Linux.Namespaces {
 			if ns.Type == specs.UTSNamespace && ns.Path != "" {
-				err := RunCommand("nsenter", "--uts="+ns.Path, "hostname", spec.Hostname)
+				err := RunCommand("nsenter", "--uts="+ns.Path, "hostnamectl", "set-hostname", spec.Hostname)
 				if err != nil {
 					return errors.Wrap(err, "failed to set hostname")
 				}
