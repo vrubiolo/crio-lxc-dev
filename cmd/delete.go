@@ -130,9 +130,10 @@ func killCgroupProcs(scope string) error {
 	// A trailing newline is always present.
 	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
 	if len(pidStrings) == 0 {
-		log.Warn().Msg("cgroup.procs is empty - it should contain at least the init process PID?")
 		return nil
 	}
+
+	log.Warn().Strs("pids:", pidStrings).Str("cgroup:", scope).Msg("killing left-over container processes")
 
 	for _, s := range pidStrings {
 		pid, err := strconv.Atoi(s)
