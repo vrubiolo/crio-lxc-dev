@@ -3,7 +3,7 @@ COMMIT_HASH=$(shell git describe --always --tags --long)
 COMMIT=$(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_HASH)-dirty,$(COMMIT_HASH))
 TEST?=$(patsubst test/%.bats,%,$(wildcard test/*.bats))
 PACKAGES_DIR?=~/packages
-PKG_CONFIG := $(shell pkg-config --libs --cflags lxc)
+PKG_CONFIG := PKG_CONFIG_PATH=/usr/local/lib/pkgconfig $(shell pkg-config --libs --cflags lxc)
 BINS := crio-lxc crio-lxc-start crio-lxc-init crio-lxc-hook
 PREFIX ?= /usr/local
 CGO_ENABLED=0 
