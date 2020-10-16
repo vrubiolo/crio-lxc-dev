@@ -34,7 +34,7 @@ func main() {
 			Name:        "log-level",
 			Usage:       "set log level (trace|debug|info|warn|error)",
 			EnvVars:     []string{"CRIO_LXC_LOG_LEVEL"},
-			Value:       "info",
+			Value:       "warn",
 			Destination: &clxc.LogLevelString,
 		},
 		&cli.StringFlag{
