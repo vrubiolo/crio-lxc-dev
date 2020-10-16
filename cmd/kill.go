@@ -6,8 +6,11 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -89,8 +92,58 @@ func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	return pid, proc, nil
 }
 
+// getCgroupProcs returns the PIDs for all processes which are in the
+// same control group as the process for which the PID is given.
+func getCgroupProcs(pid int) ([]int, error) {
+	procCgroup := fmt.Sprintf("/proc/%d/cgroup", pid)
+
+	data, err := ioutil.ReadFile(procCgroup)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read %s", procCgroup)
+	}
+	// see 'man 7 cgroups #/proc files'
+	// for cgroup2 unified hierarchy the format is '0::{path relative to cgroup mount}'
+	parts := strings.SplitN(string(data), ":", 3)
+	if len(parts) != 3 {
+		return nil, errors.Wrapf(err, "unsupported proc cgroup format: %s", data)
+	}
+	if parts[0] != "0" {
+		return nil, fmt.Errorf("expected cgroups 2 identifier in cgroup file: %s", data)
+	}
+
+	cgroupPath := strings.TrimSpace(parts[2])
+	cgroupProcsPath := filepath.Join("/sys/fs/cgroup", cgroupPath, "cgroup.procs")
+	log.Debug().Str("path:", cgroupProcsPath).Msg("reading control group process list")
+	procsData, err := ioutil.ReadFile(cgroupProcsPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
+	}
+	// cgroup.procs contains one PID per line and is newline separated.
+	// A trailing newline is always present.
+	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
+	if len(pidStrings) == 0 {
+		log.Warn().Msg("cgroup.procs is empty - it should contain at least the init process PID?")
+		return nil, nil
+	}
+
+	pids := make([]int, 0, len(pidStrings))
+	for _, s := range pidStrings {
+		pid, err := strconv.Atoi(s)
+		if err != nil {
+			// reading garbage from cgroup.procs should not happen
+			return nil, errors.Wrapf(err, "failed to convert PID %q to number", s)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
+/*
 func killContainer(c *lxc.Container, signum unix.Signal) error {
-	// try to freeze the container to get a 'stable' view of the cgroup processes
+  }
+
+
+
 	err := c.Freeze()
 	if err != nil {
 		log.Warn().Msg("failed to freeze container")
@@ -101,16 +154,31 @@ func killContainer(c *lxc.Container, signum unix.Signal) error {
 	if pid < 1 {
 		return fmt.Errorf("expected init pid > 0, but was %d", pid)
 	}
-	if err := unix.Kill(pid, signum); err != nil {
-		return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+	  log.Debug().Int("pid:", pid).Msg("container init PID")
+	  pids, err := getCgroupProcs(pid)
+	  if err != nil {
+		  return err
+	  }
+	  log.Debug().Ints("pids:", pids).Str("sig:", signum.String()).Msg("killing container processes")
+	  for _, pid := range pids {
+		  if err := unix.Kill(pid, signum); err != nil {
+			  return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+		  }
+	  }
 	}
+	if signum == unix.SIGTERM {
+	  c.Stop()
+
 	return nil
 }
+*/
+
+const SIGZERO = unix.Signal(0)
 
 func getSignal(ctx *cli.Context) (unix.Signal, error) {
 	sig := ctx.Args().Get(1)
 	if len(sig) == 0 {
-		return unix.SIGCONT, errors.New("missing signal")
+		return SIGZERO, errors.New("missing signal")
 	}
 
 	// handle numerical signal value
@@ -120,13 +188,13 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 				return signum, nil
 			}
 		}
-		return unix.SIGCONT, fmt.Errorf("signal %s does not exist", sig)
+		return SIGZERO, fmt.Errorf("signal %s does not exist", sig)
 	}
 
 	// handle string signal value
 	signum, exists := signalMap[sig]
 	if !exists {
-		return unix.SIGCONT, fmt.Errorf("signal %s does not exist", sig)
+		return unix.Signal(0), fmt.Errorf("signal %s does not exist", sig)
 	}
 	return signum, nil
 }
@@ -146,5 +214,8 @@ func doKill(ctx *cli.Context) error {
 		return errors.Wrap(err, "invalid signal param")
 	}
 
-	return killContainer(clxc.Container, signum)
+	if err := clxc.SetConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
+		return err
+	}
+	return clxc.Container.Stop()
 }

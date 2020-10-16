@@ -739,17 +739,17 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	// TODO  why does neither cri-o nor lxc set the hostname?
 	// FIXME avoid to call external command nsenter
 	/*
-	if spec.Hostname != "" {
-		for _, ns := range spec.Linux.Namespaces {
-			if ns.Type == specs.UTSNamespace && ns.Path != "" {
-				err := RunCommand("nsenter", "--uts="+ns.Path, "hostnamectl", "set-hostname", spec.Hostname)
-				if err != nil {
-					return errors.Wrap(err, "failed to set hostname")
+		if spec.Hostname != "" {
+			for _, ns := range spec.Linux.Namespaces {
+				if ns.Type == specs.UTSNamespace && ns.Path != "" {
+					err := RunCommand("nsenter", "--uts="+ns.Path, "hostnamectl", "set-hostname", spec.Hostname)
+					if err != nil {
+						return errors.Wrap(err, "failed to set hostname")
+					}
+					break
 				}
-				break
 			}
 		}
-	}
 	*/
 
 	// pass context information as environment variables to hook scripts

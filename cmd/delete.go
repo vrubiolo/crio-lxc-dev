@@ -52,22 +52,24 @@ func doDelete(ctx *cli.Context) error {
 		}
 	}
 
-	if vals := c.ConfigItem("lxc.cgroup.dir"); len(vals) > 0 {
-		if err := cleanupCgroupDir(vals[0]); err != nil {
-			return errors.Wrap(err, "failed to delete lxc.cgroup.dir")
-		}
-	} else {
-		if vals := c.ConfigItem("lxc.cgroup.dir.container"); len(vals) > 0 {
+	/*
+		if vals := c.ConfigItem("lxc.cgroup.dir"); len(vals) > 0 {
 			if err := cleanupCgroupDir(vals[0]); err != nil {
-				return errors.Wrap(err, "failed to delete lxc.cgroup.dir.container")
+				return errors.Wrap(err, "failed to delete lxc.cgroup.dir")
+			}
+		} else {
+			if vals := c.ConfigItem("lxc.cgroup.dir.container"); len(vals) > 0 {
+				if err := cleanupCgroupDir(vals[0]); err != nil {
+					return errors.Wrap(err, "failed to delete lxc.cgroup.dir.container")
+				}
+			}
+			if vals := c.ConfigItem("lxc.cgroup.dir.monitor"); len(vals) > 0 {
+				if err := cleanupCgroupDir(vals[0]); err != nil {
+					return errors.Wrap(err, "failed to delete lxc.cgroup.dir.monitor")
+				}
 			}
 		}
-		if vals := c.ConfigItem("lxc.cgroup.dir.monitor"); len(vals) > 0 {
-			if err := cleanupCgroupDir(vals[0]); err != nil {
-				return errors.Wrap(err, "failed to delete lxc.cgroup.dir.monitor")
-			}
-		}
-	}
+	*/
 
 	if err := c.Destroy(); err != nil {
 		return errors.Wrap(err, "failed to delete container")
