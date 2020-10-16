@@ -738,6 +738,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 	// when we still have the capability to do so (CAP_SYS_ADMIN)
 	// TODO  why does neither cri-o nor lxc set the hostname?
 	// FIXME avoid to call external command nsenter
+	/*
 	if spec.Hostname != "" {
 		for _, ns := range spec.Linux.Namespaces {
 			if ns.Type == specs.UTSNamespace && ns.Path != "" {
@@ -749,6 +750,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 			}
 		}
 	}
+	*/
 
 	// pass context information as environment variables to hook scripts
 	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
