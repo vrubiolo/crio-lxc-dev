@@ -150,17 +150,22 @@ func killContainer(c *lxc.Container, signum unix.Signal) error {
 	if pid < 1 {
 		return fmt.Errorf("expected init pid > 0, but was %d", pid)
 	}
-	log.Debug().Int("pid:", pid).Msg("container init PID")
-	pids, err := getCgroupProcs(pid)
-	if err != nil {
-		return err
+	if err := unix.Kill(pid, signum); err != nil {
+		return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
 	}
-	log.Debug().Ints("pids:", pids).Str("sig:", signum.String()).Msg("killing container processes")
-	for _, pid := range pids {
-		if err := unix.Kill(pid, signum); err != nil {
-			return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+	/*
+		log.Debug().Int("pid:", pid).Msg("container init PID")
+		pids, err := getCgroupProcs(pid)
+		if err != nil {
+			return err
 		}
-	}
+		log.Debug().Ints("pids:", pids).Str("sig:", signum.String()).Msg("killing container processes")
+		for _, pid := range pids {
+			if err := unix.Kill(pid, signum); err != nil {
+				return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
+			}
+		}
+	*/
 	return nil
 }
 
