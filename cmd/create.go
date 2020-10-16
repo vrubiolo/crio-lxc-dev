@@ -289,15 +289,23 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 	}
 	fmt.Fprintf(w, "allowlist %s\n", action)
 
-	for _, arch := range seccomp.Architectures {
-		archName := strings.TrimLeft(string(arch), "SCMP_ARCH_")
-		fmt.Fprintf(w, "[%s]\n", archName)
-		for _, sc := range seccomp.Syscalls {
-			if err := writeSeccompSyscall(w, sc); err != nil {
-				return err
-			}
+	w.WriteString("[x86_64]\n")
+	for _, sc := range seccomp.Syscalls {
+		if err := writeSeccompSyscall(w, sc); err != nil {
+			return err
 		}
 	}
+	/*
+		for _, arch := range seccomp.Architectures {
+			archName := strings.TrimLeft(string(arch), "SCMP_ARCH_")
+			fmt.Fprintf(w, "[%s]\n", archName)
+			for _, sc := range seccomp.Syscalls {
+				if err := writeSeccompSyscall(w, sc); err != nil {
+					return err
+				}
+			}
+		}
+	*/
 	return nil
 }
 
