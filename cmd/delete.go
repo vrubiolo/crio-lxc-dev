@@ -83,7 +83,7 @@ func doDelete(ctx *cli.Context) error {
 
 func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 	vals := c.ConfigItem(cfgName)
-	if len(vals) < 1 {
+	if len(vals) < 1 || vals[0] == "" {
 		return nil
 	}
 
@@ -143,7 +143,11 @@ func killCgroupProcs(scope string) (int, error) {
 	}
 	// cgroup.procs contains one PID per line and is newline separated.
 	// A trailing newline is always present.
-	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
+	s := strings.TrimSpace(string(procsData))
+	if s == "" {
+		return 0, nil
+	}
+	pidStrings := strings.Split(s, "\n")
 	numPids := len(pidStrings)
 	if numPids == 0 {
 		return 0, nil
