@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -52,30 +53,18 @@ func doDelete(ctx *cli.Context) error {
 		}
 	}
 
-	/*
-		if vals := c.ConfigItem("lxc.cgroup.dir"); len(vals) > 0 {
-			if err := cleanupCgroupDir(vals[0]); err != nil {
-				return errors.Wrap(err, "failed to delete lxc.cgroup.dir")
-			}
-		} else {
-			if vals := c.ConfigItem("lxc.cgroup.dir.container"); len(vals) > 0 {
-				if err := cleanupCgroupDir(vals[0]); err != nil {
-					return errors.Wrap(err, "failed to delete lxc.cgroup.dir.container")
-				}
-			}
-			if vals := c.ConfigItem("lxc.cgroup.dir.monitor"); len(vals) > 0 {
-				if err := cleanupCgroupDir(vals[0]); err != nil {
-					return errors.Wrap(err, "failed to delete lxc.cgroup.dir.monitor")
-				}
-			}
-		}
-	*/
-
 	if err := c.Destroy(); err != nil {
 		return errors.Wrap(err, "failed to delete container")
 	}
 
-	// load spec
+	// left-over directories .lxc lxc.pivot
+	if err := tryRemoveAllCgroupDir(c, "lxc.cgroup.dir"); err != nil {
+		log.Warn().Err(err).Msg("remove lxc.cgroup.dir failed")
+	}
+	if err := tryRemoveAllCgroupDir(c, "lxc.cgroup.dir.container"); err != nil {
+		log.Warn().Err(err).Msg("remove lxc.cgroup.dir.container failed")
+	}
+	//tryRemoveAllCgroupDir(c, "lxc.cgroup.dir.monitor")
 	/*
 		spec, err := clxc.ReadSpec(clxc.RuntimePath(clxc.INIT_SPEC))
 		if err != nil {
@@ -92,7 +81,14 @@ func doDelete(ctx *cli.Context) error {
 	return os.RemoveAll(clxc.RuntimePath())
 }
 
-func cleanupCgroupDir(dirName string) error {
+func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
+	vals := c.ConfigItem(cfgName)
+	if len(vals) < 1 {
+		return nil
+	}
+
+	dirName := filepath.Join("/sys/fs/cgroup", vals[0])
+	log.Warn().Str("dirnName:", dirName).Msg("MARK")
 	dir, err := os.Open(dirName)
 	if os.IsNotExist(err) {
 		return nil
@@ -100,19 +96,35 @@ func cleanupCgroupDir(dirName string) error {
 	if err != nil {
 		return err
 	}
+	timer := time.NewTimer(time.Second * 3)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return fmt.Errorf("timeout killing processes")
+		default:
+			nprocs, err := killCgroupProcs(dirName)
+			if err != nil {
+				return err
+			}
+			if nprocs == 0 {
+				break
+			}
+			time.Sleep(time.Millisecond * 10)
+		}
+	}
 	// FIXME use 'crio-{containerName}.scope'  ?
 	entries, err := dir.Readdir(-1)
 	if err != nil {
 		return err
 	}
+	// leftover lxc.pivot path
 	for _, i := range entries {
-		if i.IsDir() {
+		if i.IsDir() && i.Name() != "." && i.Name() != ".." {
 			fullPath := filepath.Join(dirName, i.Name())
-			if err := killCgroupProcs(fullPath); err != nil {
-				return err
-			}
+			log.Warn().Str("cgroup:", fullPath).Msg("MARK")
 			if err := unix.Rmdir(fullPath); err != nil {
-				return err
+				return errors.Wrapf(err, "failed rmdir %s", fullPath)
 			}
 		}
 	}
@@ -121,18 +133,20 @@ func cleanupCgroupDir(dirName string) error {
 
 // getCgroupProcs returns the PIDs for all processes which are in the
 // same control group as the process for which the PID is given.
-func killCgroupProcs(scope string) error {
+// killing is hard https://lwn.net/Articles/754980/
+func killCgroupProcs(scope string) (int, error) {
 	cgroupProcsPath := filepath.Join(scope, "cgroup.procs")
 	log.Debug().Str("path:", cgroupProcsPath).Msg("reading control group process list")
 	procsData, err := ioutil.ReadFile(cgroupProcsPath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
+		return -1, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
 	}
 	// cgroup.procs contains one PID per line and is newline separated.
 	// A trailing newline is always present.
 	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
-	if len(pidStrings) == 0 {
-		return nil
+	numPids := len(pidStrings)
+	if numPids == 0 {
+		return 0, nil
 	}
 
 	log.Warn().Strs("pids:", pidStrings).Str("cgroup:", scope).Msg("killing left-over container processes")
@@ -141,11 +155,15 @@ func killCgroupProcs(scope string) error {
 		pid, err := strconv.Atoi(s)
 		if err != nil {
 			// reading garbage from cgroup.procs should not happen
-			return errors.Wrapf(err, "failed to convert PID %q to number", s)
+			return -1, errors.Wrapf(err, "failed to convert PID %q to number", s)
 		}
+		// make this process a session leader
+		// and move all process to this session leader ?
+
 		if err := unix.Kill(pid, 9); err != nil {
-			return errors.Wrapf(err, "failed to kill %d", pid)
+			return -1, errors.Wrapf(err, "failed to kill %d", pid)
 		}
 	}
-	return nil
+
+	return numPids, nil
 }

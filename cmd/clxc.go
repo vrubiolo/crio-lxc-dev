@@ -85,6 +85,9 @@ func (c *CrioLXC) LoadContainer() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to load container")
 	}
+	if err := container.LoadConfigFile(c.RuntimePath("config")); err != nil {
+		return err
+	}
 	c.Container = container
 	return nil
 }
