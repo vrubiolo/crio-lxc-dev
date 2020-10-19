@@ -82,12 +82,12 @@ func doDelete(ctx *cli.Context) error {
 }
 
 func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
-	vals := c.ConfigItem(cfgName)
-	if len(vals) < 1 || vals[0] == "" {
+	val := clxc.GetConfigItem(cfgName)
+	if val == "" {
 		return nil
 	}
 
-	dirName := filepath.Join("/sys/fs/cgroup", vals[0])
+	dirName := filepath.Join("/sys/fs/cgroup", val)
 	log.Warn().Str("dirnName:", dirName).Msg("MARK")
 	dir, err := os.Open(dirName)
 	if os.IsNotExist(err) {

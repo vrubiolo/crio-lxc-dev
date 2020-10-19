@@ -171,6 +171,19 @@ func (c *CrioLXC) configureLogging() error {
 	return nil
 }
 
+func (c *CrioLXC) GetConfigItem(key string) string {
+	vals := c.Container.ConfigItem(key)
+	if len(vals) > 0 {
+		first := vals[0]
+		// some lxc config values are set to '(null)' if unset
+		// eg. lxc.cgroup.dir
+		if first != "(null)" {
+			return first
+		}
+	}
+	return ""
+}
+
 func (c *CrioLXC) SetConfigItem(key, value string) error {
 	err := c.Container.SetConfigItem(key, value)
 	if err != nil {
