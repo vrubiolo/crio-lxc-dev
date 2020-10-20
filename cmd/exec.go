@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 
@@ -9,8 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
-	"golang.org/x/sys/unix"
-
+	api "github.com/lxc/crio-lxc/clxc"
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
 
@@ -39,9 +39,6 @@ var execCmd = cli.Command{
 	},
 }
 
-// NOTE stdio (stdout/stderr) is not attached when adding unix.CLONE_NEWUSER
-const EXEC_NAMESPACES = unix.CLONE_NEWIPC | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWNET | unix.CLONE_NEWCGROUP | unix.CLONE_NEWPID
-
 func doExec(ctx *cli.Context) error {
 	err := clxc.LoadContainer()
 	if err != nil {
@@ -49,23 +46,24 @@ func doExec(ctx *cli.Context) error {
 	}
 	c := clxc.Container
 
-	attachOpts := lxc.AttachOptions{
-		Namespaces: EXEC_NAMESPACES,
-	}
+	attachOpts := lxc.AttachOptions{}
 
 	var procArgs []string
 	specFilePath := ctx.String("process")
 
-	log.Debug().Str("spec:", specFilePath).Msg("read process spec")
-	specData, err := ioutil.ReadFile(specFilePath)
-	log.Trace().Err(err).RawJSON("spec", specData).Msg("process spec data")
+	if specFilePath != "" {
+		log.Debug().Str("spec:", specFilePath).Msg("read process spec")
+		specData, err := ioutil.ReadFile(specFilePath)
+		log.Trace().Err(err).RawJSON("spec", specData).Msg("process spec data")
 
-	if err == nil {
-		// prefer the process spec file
-		var procSpec *specs.Process
-		err := json.Unmarshal(specData, &procSpec)
 		if err != nil {
-			return errors.Wrapf(err, "failed to read process spec")
+			return errors.Wrap(err, "failed to read process spec")
+		}
+
+		var procSpec *specs.Process
+		err = json.Unmarshal(specData, &procSpec)
+		if err != nil {
+			return errors.Wrapf(err, "failed to unmarshal process spec")
 		}
 		// tanslate process spec to lxc.AttachOptions
 		procArgs = procSpec.Args
@@ -75,11 +73,42 @@ func doExec(ctx *cli.Context) error {
 		// Do not inherit the parent process environment
 		attachOpts.ClearEnv = true
 		attachOpts.Env = procSpec.Env
+
+		/* FIXME handlevalues not supported by go-lxc ?
+		   // Capabilities are Linux capabilities that are kept for the process.
+		   Capabilities *LinuxCapabilities `json:"capabilities,omitempty" platform:"linux"`
+		   // Rlimits specifies rlimit options to apply to the process.
+		   Rlimits []POSIXRlimit `json:"rlimits,omitempty" platform:"linux,solaris"`
+		   // NoNewPrivileges controls whether additional privileges could be gained by processes in the container.
+		   NoNewPrivileges bool `json:"noNewPrivileges,omitempty" platform:"linux"`
+		   // ApparmorProfile specifies the apparmor profile for the container.
+		   ApparmorProfile string `json:"apparmorProfile,omitempty" platform:"linux"`
+		   // Specify an oom_score_adj for the container.
+		   OOMScoreAdj *int `json:"oomScoreAdj,omitempty" platform:"linux"`
+		   // SelinuxLabel specifies the selinux context that the container process is run as.
+		   SelinuxLabel str
+		*/
+
 	} else {
 		// fall back to cmdline arguments
 		if ctx.Args().Len() >= 2 {
 			procArgs = ctx.Args().Slice()[1:]
 		}
+		// FIXME load container config to determine supported namespaces ?
+	}
+
+	spec, err := api.ReadSpec(clxc.RuntimePath(api.INIT_SPEC))
+	if err != nil {
+		return errors.Wrap(err, "failed to read container runtime spec")
+	}
+
+	// get namespaces
+	for _, ns := range spec.Linux.Namespaces {
+		n, supported := NamespaceMap[ns.Type]
+		if !supported {
+			return fmt.Errorf("can not attach to namespace %s: unsupported namespace", ns.Type)
+		}
+		attachOpts.Namespaces |= n.CloneFlag
 	}
 
 	attachOpts.StdinFd = os.Stdin.Fd()
