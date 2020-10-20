@@ -96,24 +96,7 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 	if err != nil {
 		return err
 	}
-	timer := time.NewTimer(time.Second * 3)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			return fmt.Errorf("timeout killing processes")
-		default:
-			nprocs, err := killCgroupProcs(dirName)
-			if err != nil {
-				return err
-			}
-			if nprocs == 0 {
-				break
-			}
-			time.Sleep(time.Millisecond * 10)
-		}
-	}
-	// FIXME use 'crio-{containerName}.scope'  ?
+	loopKillCgroupProcs(dirName, time.Second*2)
 	entries, err := dir.Readdir(-1)
 	if err != nil {
 		return err
@@ -129,6 +112,26 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 		}
 	}
 	return unix.Rmdir(dirName)
+}
+
+func loopKillCgroupProcs(scope string, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return fmt.Errorf("timeout killing processes")
+		default:
+			nprocs, err := killCgroupProcs(scope)
+			if err != nil {
+				return err
+			}
+			if nprocs == 0 {
+				return nil
+			}
+			time.Sleep(time.Millisecond * 50)
+		}
+	}
 }
 
 // getCgroupProcs returns the PIDs for all processes which are in the
