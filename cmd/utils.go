@@ -201,7 +201,6 @@ func ParseSystemdCgroupPath(s string) (cg CgroupPath) {
 	parts := strings.Split(s, ":")
 
 	slices := parts[0]
-	fmt.Printf("%s", slices)
 	for i, r := range slices {
 		if r == '-' && i > 0 {
 			slice := slices[0:i] + ".slice"
