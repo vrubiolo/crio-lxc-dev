@@ -38,9 +38,10 @@ type CrioLXC struct {
 	SpecPath       string
 
 	// feature gates
-	Seccomp      bool
-	Capabilities bool
-	Apparmor     bool
+	Seccomp       bool
+	Capabilities  bool
+	Apparmor      bool
+	CgroupDevices bool
 }
 
 func (c CrioLXC) VersionString() string {

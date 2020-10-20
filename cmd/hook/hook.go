@@ -35,6 +35,20 @@ func main() {
 			fail(err, "failed to create device "+dev.Path)
 		}
 	}
+	/*
+	   To use this option effectively, /dev/ptmx must be a symbolic link to pts/ptmx.  See Docu‐
+	   mentation/filesystems/devpts.txt in the Linux kernel source tree for details.
+	*/
+	// TODO check if devpts is mounted
+	/*
+		if err := os.Remove(filepath.Join(rootfs, "/dev/ptmx")); err != nil {
+		  fmt.Fprintf(os.Stderr, "Failed to remove /dev/ptmx: %s) err)
+		}
+
+		if err := os.Symlink("/dev/pts/ptmx", filepath.Join(rootfs, "/dev/ptmx")); err != nil {
+		    fail(err, "failed to create symlink /dev/ptmx -> /dev/pts/ptmx")
+		}
+	*/
 
 	for _, p := range spec.Linux.MaskedPaths {
 		rp := filepath.Join(rootfs, p)

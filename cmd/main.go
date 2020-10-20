@@ -129,6 +129,13 @@ func main() {
 			EnvVars:     []string{"CRIO_LXC_APPARMOR"},
 			Value:       true,
 		},
+		&cli.BoolFlag{
+			Name:        "cgroup-devices",
+			Usage:       "Allow only devices permitted by container spec",
+			Destination: &clxc.CgroupDevices,
+			EnvVars:     []string{"CRIO_LXC_CGROUP_DEVICES"},
+			Value:       true,
+		},
 	}
 
 	app.Before = func(ctx *cli.Context) error {

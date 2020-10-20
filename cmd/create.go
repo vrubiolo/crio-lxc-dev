@@ -52,19 +52,23 @@ var createCmd = cli.Command{
 	},
 }
 
+type Namespace struct {
+	Name      string
+	CloneFlag int
+}
+
 // maps from CRIO namespace names to LXC names
-var NamespaceMap = map[string]string{
-	"cgroup":  "cgroup",
-	"ipc":     "ipc",
-	"mount":   "mnt",
-	"network": "net",
-	"pid":     "pid",
-	"user":    "user",
-	"uts":     "uts",
+var NamespaceMap = map[specs.LinuxNamespaceType]Namespace{
+	specs.CgroupNamespace:  Namespace{"cgroup", unix.CLONE_NEWCGROUP},
+	specs.IPCNamespace:     Namespace{"ipc", unix.CLONE_NEWIPC},
+	specs.MountNamespace:   Namespace{"mnt", unix.CLONE_NEWNS},
+	specs.NetworkNamespace: Namespace{"net", unix.CLONE_NEWNET},
+	specs.PIDNamespace:     Namespace{"pid", unix.CLONE_NEWPID},
+	specs.UserNamespace:    Namespace{"user", unix.CLONE_NEWUSER},
+	specs.UTSNamespace:     Namespace{"uts", unix.CLONE_NEWUTS},
 }
 
 func createInitSpec(spec *specs.Spec) error {
-
 	err := RunCommand("mkdir", "-p", "-m", "0755", filepath.Join(spec.Root.Path, api.CFG_DIR))
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", api.CFG_DIR)
@@ -119,11 +123,9 @@ func createInitSpec(spec *specs.Spec) error {
 	return clxc.SetConfigItem("lxc.init.cmd", api.INIT_CMD)
 }
 
-// TODO ensure network and user namespace are shared together (why ?
 func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 	procPidPathRE := regexp.MustCompile(`/proc/(\d+)/ns`)
 
-	var nsToClone []string
 	var configVal string
 	seenNamespaceTypes := map[specs.LinuxNamespaceType]bool{}
 	for _, ns := range spec.Linux.Namespaces {
@@ -132,34 +134,48 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 		}
 		seenNamespaceTypes[ns.Type] = true
 		if ns.Path == "" {
-			nsToClone = append(nsToClone, NamespaceMap[string(ns.Type)])
-		} else {
-			configKey := fmt.Sprintf("lxc.namespace.share.%s", NamespaceMap[string(ns.Type)])
-
-			matches := procPidPathRE.FindStringSubmatch(ns.Path)
-			switch len(matches) {
-			case 0:
-				configVal = ns.Path
-			case 1:
-				return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-			case 2:
-				configVal = matches[1]
-			default:
-				return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-			}
-
-			if err := clxc.SetConfigItem(configKey, configVal); err != nil {
-				return err
-			}
+			continue
 		}
-	}
 
-	if len(nsToClone) > 0 {
-		configVal = strings.Join(nsToClone, " ")
-		if err := clxc.SetConfigItem("lxc.namespace.clone", configVal); err != nil {
+		n, supported := NamespaceMap[ns.Type]
+		if !supported {
+			return fmt.Errorf("Unsupported namespace %s", ns.Type)
+		}
+		configKey := fmt.Sprintf("lxc.namespace.share.%s", n.Name)
+
+		matches := procPidPathRE.FindStringSubmatch(ns.Path)
+		switch len(matches) {
+		case 0:
+			configVal = ns.Path
+		case 1:
+			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
+		case 2:
+			configVal = matches[1]
+		default:
+			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
+		}
+
+		if err := clxc.SetConfigItem(configKey, configVal); err != nil {
 			return err
 		}
 	}
+
+	// Note  that  if the container requests a new user namespace and the container wants to in‐
+	// herit the network namespace it needs to inherit the user namespace as well.
+	if !seenNamespaceTypes[specs.NetworkNamespace] && seenNamespaceTypes[specs.UserNamespace] {
+		return fmt.Errorf("to inherit the network namespace the user namespace must be inherited as well")
+	}
+
+	nsToKeep := make([]string, 0, len(NamespaceMap))
+	for key, n := range NamespaceMap {
+		if !seenNamespaceTypes[key] {
+			nsToKeep = append(nsToKeep, n.Name)
+		}
+	}
+	if err := clxc.SetConfigItem("lxc.namespace.keep", strings.Join(nsToKeep, " ")); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -427,13 +443,17 @@ func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {
 	return false
 }
 
-func addDevice(spec *specs.Spec, dev specs.LinuxDevice, mode os.FileMode, uid, gid uint32) {
+func addDevice(spec *specs.Spec, dev specs.LinuxDevice, mode os.FileMode, uid uint32, gid uint32, access string) {
 	dev.FileMode = &mode
 	dev.UID = &uid
 	dev.GID = &gid
 	spec.Linux.Devices = append(spec.Linux.Devices, dev)
 
-	devCgroup := specs.LinuxDeviceCgroup{Allow: true, Type: dev.Type, Major: &dev.Major, Minor: &dev.Minor, Access: "rwm"}
+	addDevicePerms(spec, dev.Type, &dev.Major, &dev.Minor, access)
+}
+
+func addDevicePerms(spec *specs.Spec, devType string, major *int64, minor *int64, access string) {
+	devCgroup := specs.LinuxDeviceCgroup{Allow: true, Type: devType, Major: major, Minor: minor, Access: access}
 	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, devCgroup)
 }
 
@@ -459,13 +479,21 @@ func ensureDefaultDevices(spec *specs.Spec) error {
 		specs.LinuxDevice{Path: "/dev/urandom", Type: "c", Major: 1, Minor: 9},
 		specs.LinuxDevice{Path: "/dev/tty", Type: "c", Major: 5, Minor: 0},
 		// FIXME runtime mandates that /dev/ptmx should be bind mount from host - why ?
-		specs.LinuxDevice{Path: "/dev/ptmx", Type: "c", Major: 5, Minor: 2},
+		// `man 2 mount` | devpts
+		// ` To use this option effectively, /dev/ptmx must be a symbolic link to pts/ptmx.
+		// See Documentation/filesystems/devpts.txt in the Linux kernel source tree for details.`
 	}
+
+	ptmx := specs.LinuxDevice{Path: "/dev/ptmx", Type: "c", Major: 5, Minor: 2}
+	addDevicePerms(spec, "c", &ptmx.Major, &ptmx.Minor, "rwm") // /dev/ptmx, /dev/pts/ptmx
+
+	pts0 := specs.LinuxDevice{Path: "/dev/pts/0", Type: "c", Major: 88, Minor: 0}
+	addDevicePerms(spec, "c", &pts0.Major, nil, "rwm") // dev/pts/[0..9]
 
 	// add missing default devices
 	for _, dev := range devices {
 		if !isDeviceEnabled(spec, dev) {
-			addDevice(spec, dev, mode, uid, gid)
+			addDevice(spec, dev, mode, uid, gid, "rwm")
 		}
 	}
 	return nil
@@ -507,61 +535,8 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 		return err
 	}
 
-	if err := ensureDefaultDevices(spec); err != nil {
-		return errors.Wrapf(err, "failed to add default devices")
-	}
-
-	// Set cgroup device permissions.
-	// Device rule parsing in LXC is not well documented in lxc.container.conf
-	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
-	// mixing allow/deny is not permitted by lxc.cgroup2.devices
-	// either build up a deny list or an allow list
-	devicesAllow := "lxc.cgroup2.devices.allow"
-	devicesDeny := "lxc.cgroup2.devices.deny"
-
-	anyDevice := ""
-	blockDevice := "b"
-	charDevice := "c"
-
-	for _, dev := range linux.Resources.Devices {
-		key := devicesDeny
-		if dev.Allow {
-			key = devicesAllow
-		}
-
-		maj := "*"
-		if dev.Major != nil {
-			maj = fmt.Sprintf("%d", *dev.Major)
-		}
-
-		min := "*"
-		if dev.Minor != nil {
-			min = fmt.Sprintf("%d", *dev.Minor)
-		}
-
-		switch dev.Type {
-		case anyDevice:
-			// do not deny any device, this will also deny access to default devices
-			if !dev.Allow {
-				continue
-			}
-			// decompose
-			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-			val = fmt.Sprintf("%s %s:%s %s", charDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-		case blockDevice, charDevice:
-			val := fmt.Sprintf("%s %s:%s %s", dev.Type, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("Invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
-		}
+	if err := configureCgroupDevices(spec); err != nil {
+		return err
 	}
 
 	// Memory restriction configuration
@@ -628,6 +603,78 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	return nil
 }
 
+func configureCgroupDevices(spec *specs.Spec) error {
+	if err := ensureDefaultDevices(spec); err != nil {
+		return errors.Wrapf(err, "failed to add default devices")
+	}
+
+	devicesAllow := "lxc.cgroup2.devices.allow"
+	devicesDeny := "lxc.cgroup2.devices.deny"
+
+	if !clxc.CgroupDevices {
+		// allow read-write-mknod access to all char and block devices
+		if err := clxc.SetConfigItem(devicesAllow, "b *:* rwm"); err != nil {
+			return err
+		}
+		if err := clxc.SetConfigItem(devicesAllow, "c *:* rwm"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Set cgroup device permissions from spec.
+	// Device rule parsing in LXC is not well documented in lxc.container.conf
+	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
+	// Mixing allow/deny is not permitted by lxc.cgroup2.devices.
+	// Best practise is to build up an allow list to disable access restrict access to new/unhandled devices.
+
+	anyDevice := ""
+	blockDevice := "b"
+	charDevice := "c"
+
+	for _, dev := range spec.Linux.Resources.Devices {
+		key := devicesDeny
+		if dev.Allow {
+			key = devicesAllow
+		}
+
+		maj := "*"
+		if dev.Major != nil {
+			maj = fmt.Sprintf("%d", *dev.Major)
+		}
+
+		min := "*"
+		if dev.Minor != nil {
+			min = fmt.Sprintf("%d", *dev.Minor)
+		}
+
+		switch dev.Type {
+		case anyDevice:
+			// do not deny any device, this will also deny access to default devices
+			if !dev.Allow {
+				continue
+			}
+			// decompose
+			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+			val = fmt.Sprintf("%s %s:%s %s", charDevice, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+		case blockDevice, charDevice:
+			val := fmt.Sprintf("%s %s:%s %s", dev.Type, maj, min, dev.Access)
+			if err := clxc.SetConfigItem(key, val); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("Invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
+		}
+	}
+	return nil
+}
+
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
 	for _, ns := range spec.Linux.Namespaces {
 		if ns.Type == nsType {
@@ -673,21 +720,13 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 
 	for _, ms := range spec.Mounts {
 		if ms.Type == "cgroup" {
+			// TODO check if hieararchy is cgroup v2 only (unified mode)
 			ms.Type = "cgroup2"
 			ms.Source = "cgroup2"
 			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
 			// from 'man lxc.container.conf':
 			// If cgroup namespaces are enabled, then any cgroup auto-mounting request will be ignored,
 			// since the container can mount the filesystems itself, and automounting can confuse the container.
-			// Make cgroup mountpoint optional if cgroup namespace is not enabled (shared or cloned)
-
-			// namespace check does not work for calico pod/calico-kube-controllers-c9784d67d-2xpgx
-			// cgroupfs is already mounted (because it is shared with the host ?)
-			//if isNamespaceEnabled(spec, specs.CgroupNamespace) {
-
-			// TODO check cgroupfs is mounted correctly in calico-kube-controllers
-			//	ms.Options = append(ms.Options, "optional")
-			//}
 		}
 
 		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
@@ -753,8 +792,7 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
-	// TODO check if uts namespace should be cloned when hostname is set
-
+	// If a Hostname is defined a new UTS namespace must be created.
 	if spec.Hostname != "" {
 		if !isNamespaceEnabled(spec, specs.UTSNamespace) {
 			spec.Linux.Namespaces = append(spec.Linux.Namespaces, specs.LinuxNamespace{Type: specs.UTSNamespace})
