@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/pkg/errors"
+	"time"
 	"os"
+	"io/ioutil"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -43,6 +45,23 @@ type CrioLXC struct {
 	Apparmor      bool
 	CgroupDevices bool
 }
+
+// runtime states https://github.com/opencontainers/runtime-spec/blob/v1.0.2/runtime.md
+const (
+	// the container is being created (step 2 in the lifecycle)
+	stateCreating = "creating"
+	// the runtime has finished the create operation (after step 2 in the lifecycle),
+	// and the container process has neither exited nor executed the user-specified program
+	stateCreated = "created"
+	// the container process has executed the user-specified program
+	// but has not exited (after step 5 in the lifecycle)
+	stateRunning = "running"
+	// the container process has exited (step 7 in the lifecycle)
+	stateStopped = "stopped"
+
+	// crio-lxc-init is started but blocking at the syncfifo
+	envStateCreated = "CRIO_LXC_STATE=" + stateCreated
+)
 
 func (c CrioLXC) VersionString() string {
 	return fmt.Sprintf("%s (%s) (lxc:%s)", version, runtime.Version(), lxc.Version())
@@ -220,3 +239,88 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 		return lxc.ERROR, fmt.Errorf("Invalid log-level %s", s)
 	}
 }
+
+func (clxc *CrioLXC) getContainerState() (int, string, error) { 
+	switch state := clxc.State(); state {
+	case lxc.STARTING:
+	  return -1, stateCreating, nil
+	case lxc.STOPPED:
+	  return -1, stateStopped, nil
+	default:
+	  return clxc.getContainerInitState()
+	}
+}
+
+// getContainerInitState returns the runtime state of the container.
+// It is used to determine whether the container state is 'created' or 'running'.
+// The init process environment contains #envStateCreated if the the container
+// is created, but not yet running/started.
+// This requires the proc filesystem to be mounted on the host.
+func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
+	pid, proc, err := clxc.safeGetInitPid()
+	if err != nil {
+		// Errors returned from safeGetInitPid are non-fatal and indicate either
+		// that the init process has died. // TODO log error in debug or trace mode
+		return -1, stateStopped, nil
+	}
+	if proc != nil {
+		defer proc.Close()
+	}
+
+	envFile := fmt.Sprintf("/proc/%d/environ", pid)
+	data, err := ioutil.ReadFile(envFile)
+	if err != nil {
+		// This is fatal. It should not happen because we a filehandle to /proc/%d is open.
+		return -1, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
+	}
+
+	environ := strings.Split(string(data), "\000")
+	for _, env := range environ {
+		if env == envStateCreated {
+			return pid, stateCreated, nil
+		}
+	}
+	return pid, stateRunning, nil
+}
+
+// This is not required when lxc uses pidfd internally
+func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File, err error) {
+	pid = c.InitPid()
+	if pid < 0 {
+		return -1, nil, fmt.Errorf("expected init pid > 0, but was %d", pid)
+	}
+	// Open the proc directory of the init process to avoid that
+	// it's PID is recycled before it receives the signal.
+	proc, err = os.Open(fmt.Sprintf("/proc/%d", pid))
+	if err != nil {
+		// This may fail if either the proc filesystem is not mounted, or
+		// the process has died
+		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", pid, err)
+	}
+	// double check that the init process still exists, and the proc
+	// directory actually belongs to the init process.
+	pid2 := c.InitPid()
+	if pid2 != pid {
+		proc.Close()
+		return -1, nil, errors.Wrapf(err, "init process %d has already died", pid)
+	}
+	return pid, proc, nil
+}
+
+func (clxc *CrioLXC) waitContainerCreated(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		log.Trace().Msg("poll for container init state")
+		pid, state, err := clxc.getContainerInitState()
+		if err != nil {
+			return errors.Wrap(err, "failed to wait for container container creation")
+		}
+
+		if pid > 0 && state == stateCreated {
+			return nil
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+	return fmt.Errorf("timeout (%s) waiting for container creation", timeout)
+}
+

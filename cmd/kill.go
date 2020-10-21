@@ -4,15 +4,12 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-
-	"gopkg.in/lxc/go-lxc.v2"
 )
 
 var killCmd = cli.Command{
@@ -66,30 +63,6 @@ var signalMap = map[string]unix.Signal{
 }
 
 // Retrieve the PID from container init process safely.
-// This is not required when lxc uses pidfd internally
-func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
-	pid := c.InitPid()
-	if pid < 0 {
-		return -1, nil, fmt.Errorf("expected init pid > 0, but was %d", pid)
-	}
-	// Open the proc directory of the init process to avoid that
-	// it's PID is recycled before it receives the signal.
-	proc, err := os.Open(fmt.Sprintf("/proc/%d", pid))
-	if err != nil {
-		// This may fail if either the proc filesystem is not mounted, or
-		// the process has died
-		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", pid, err)
-	}
-	// double check that the init process still exists, and the proc
-	// directory actually belongs to the init process.
-	pid2 := c.InitPid()
-	if pid2 != pid {
-		proc.Close()
-		return -1, nil, errors.Wrapf(err, "init process %d has already died", pid)
-	}
-	return pid, proc, nil
-}
-
 func getSignal(ctx *cli.Context) (unix.Signal, error) {
 	sig := ctx.Args().Get(1)
 	if len(sig) == 0 {
