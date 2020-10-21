@@ -62,13 +62,14 @@ func doState(ctx *cli.Context) error {
 		Annotations: annotations,
 	}
 
+	var stateErr error
 	switch state := c.State(); state {
 	case lxc.STARTING:
 		s.Status = stateCreating
 	case lxc.STOPPED:
 		s.Status = stateStopped
 	default:
-		s.Pid, s.Status = getContainerInitState(c)
+		s.Pid, s.Status, stateErr = getContainerInitState(c)
 	}
 
 	stateJson, err := json.Marshal(s)
@@ -76,7 +77,7 @@ func doState(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to marshal json")
 	}
 	fmt.Fprint(os.Stdout, string(stateJson))
-	return nil
+	return stateErr
 }
 
 // getContainerInitState returns the runtime state of the container.
@@ -84,10 +85,12 @@ func doState(ctx *cli.Context) error {
 // The init process environment contains #envStateCreated if the the container
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
-func getContainerInitState(c *lxc.Container) (int, string) {
+func getContainerInitState(c *lxc.Container) (int, string, error) {
 	pid, proc, err := safeGetInitPid(c)
 	if err != nil {
-		return -1, stateStopped
+		// Errors returned from safeGetInitPid are non-fatal and indicate either
+		// that the init process has died. // TODO log error in debug or trace mode
+		return -1, stateStopped, nil
 	}
 	if proc != nil {
 		defer proc.Close()
@@ -96,18 +99,15 @@ func getContainerInitState(c *lxc.Container) (int, string) {
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
-		//fmt.Fprintf(os.Stderr, "failed to read init process environment %s: %s", envFile, err)
-		return -1, stateStopped
+		// This is fatal. It should not happen because we a filehandle to /proc/%d is open.
+		return -1, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
 	}
 
 	environ := strings.Split(string(data), "\000")
 	for _, env := range environ {
 		if env == envStateCreated {
-			return pid, stateCreated
+			return pid, stateCreated, nil
 		}
 	}
-	// the init process is runnig
-	// checking for the existence of #envStateRunning within the environment
-	// will not work for processes which call exec with a modified environment e.g the nginx image.
-	return pid, stateRunning
+	return pid, stateRunning, nil
 }

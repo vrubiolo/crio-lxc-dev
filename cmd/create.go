@@ -962,21 +962,22 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 	}
 
 	log.Debug().Msg("waiting for container creation")
-	if !waitContainerCreated(c, timeout) {
-		return fmt.Errorf("waiting for container timed out (%s)", timeout)
-	}
-	return nil
+	return waitContainerCreated(c, timeout)
 }
 
-func waitContainerCreated(c *lxc.Container, timeout time.Duration) bool {
+func waitContainerCreated(c *lxc.Container, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		log.Debug().Msg("container init state")
-		pid, state := getContainerInitState(c)
+		log.Trace().Msg("poll for container init state")
+		pid, state, err := getContainerInitState(c)
+		if err != nil {
+			return errors.Wrap(err, "failed to wait for container container creation")
+		}
+
 		if pid > 0 && state == stateCreated {
-			return true
+			return nil
 		}
 		time.Sleep(time.Millisecond * 50)
 	}
-	return false
+	return fmt.Errorf("timeout (%s) waiting for container creation", timeout)
 }
