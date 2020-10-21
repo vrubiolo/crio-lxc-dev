@@ -10,8 +10,6 @@ import (
 
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
-
-	lxc "gopkg.in/lxc/go-lxc.v2"
 )
 
 var seccompAction = map[specs.LinuxSeccompAction]string{
@@ -24,23 +22,52 @@ var seccompAction = map[specs.LinuxSeccompAction]string{
 	//specs.ActKillProcess: "kill_process",
 }
 
-func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
-	for _, name := range sc.Names {
-		action, ok := seccompAction[sc.Action]
-		if !ok {
-			return fmt.Errorf("unsupported seccomp action: %s", sc.Action)
+func configureSeccomp(spec *specs.Spec) error {
+	if spec.Linux.Seccomp == nil || len(spec.Linux.Seccomp.Syscalls) == 0 {
+		return nil
+	}
+
+	if spec.Process.NoNewPrivileges {
+		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+			return err
 		}
-		if len(sc.Args) == 0 {
-			fmt.Fprintf(w, "%s %s\n", name, action)
-		} else {
-			// Only write a single argument per line - this is required when the same arg.Index is used multiple times.
-			// from `man 7 seccomp_rule_add_exact_array`
-			// "When adding syscall argument comparisons to the filter it is important to remember
-			// that while it is possible to have multiple comparisons in a single rule,
-			// you can only compare each argument once in a single rule.
-			// In other words, you can not have multiple comparisons of the 3rd syscall argument in a single rule."
-			for _, arg := range sc.Args {
-				fmt.Fprintf(w, "%s %s [%d,%d,%s,%d]\n", name, action, arg.Index, arg.Value, arg.Op, arg.ValueTwo)
+	}
+
+	profilePath := clxc.RuntimePath("seccomp.conf")
+	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
+		return err
+	}
+
+	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
+}
+
+func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
+	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)
+	if err != nil {
+		return err
+	}
+	defer profile.Close()
+
+	w := bufio.NewWriter(profile)
+	defer w.Flush()
+
+	w.WriteString("2\n")
+	action, err := defaultAction(seccomp)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "allowlist %s\n", action)
+
+	platformArchs, err := seccompArchs(seccomp)
+	if err != nil {
+		return errors.Wrap(err, "Failed to detect platform architecture")
+	}
+	log.Debug().Str("action:", action).Strs("archs:", platformArchs).Msg("create seccomp profile")
+	for _, arch := range platformArchs {
+		fmt.Fprintf(w, "[%s]\n", arch)
+		for _, sc := range seccomp.Syscalls {
+			if err := writeSeccompSyscall(w, sc); err != nil {
+				return err
 			}
 		}
 	}
@@ -84,60 +111,25 @@ func seccompArchs(seccomp *specs.LinuxSeccomp) ([]string, error) {
 	return archs, nil
 }
 
-func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
-	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)
-	if err != nil {
-		return err
-	}
-	defer profile.Close()
-
-	w := bufio.NewWriter(profile)
-	defer w.Flush()
-
-	w.WriteString("2\n")
-	action, err := defaultAction(seccomp)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "allowlist %s\n", action)
-
-	platformArchs, err := seccompArchs(seccomp)
-	if err != nil {
-		return errors.Wrap(err, "Failed to detect platform architecture")
-	}
-	log.Debug().Str("action:", action).Strs("archs:", platformArchs).Msg("create seccomp profile")
-	for _, arch := range platformArchs {
-		fmt.Fprintf(w, "[%s]\n", arch)
-		for _, sc := range seccomp.Syscalls {
-			if err := writeSeccompSyscall(w, sc); err != nil {
-				return err
+func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
+	for _, name := range sc.Names {
+		action, ok := seccompAction[sc.Action]
+		if !ok {
+			return fmt.Errorf("unsupported seccomp action: %s", sc.Action)
+		}
+		if len(sc.Args) == 0 {
+			fmt.Fprintf(w, "%s %s\n", name, action)
+		} else {
+			// Only write a single argument per line - this is required when the same arg.Index is used multiple times.
+			// from `man 7 seccomp_rule_add_exact_array`
+			// "When adding syscall argument comparisons to the filter it is important to remember
+			// that while it is possible to have multiple comparisons in a single rule,
+			// you can only compare each argument once in a single rule.
+			// In other words, you can not have multiple comparisons of the 3rd syscall argument in a single rule."
+			for _, arg := range sc.Args {
+				fmt.Fprintf(w, "%s %s [%d,%d,%s,%d]\n", name, action, arg.Index, arg.Value, arg.Op, arg.ValueTwo)
 			}
 		}
 	}
 	return nil
-}
-
-func configureSeccomp(c *lxc.Container, spec *specs.Spec) error {
-	if !clxc.Seccomp {
-		return nil
-	}
-
-	if spec.Linux.Seccomp == nil || len(spec.Linux.Seccomp.Syscalls) == 0 {
-		return nil
-	}
-
-	// TODO warn if seccomp is not available in liblxc
-
-	if spec.Process.NoNewPrivileges {
-		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
-			return err
-		}
-	}
-
-	profilePath := clxc.RuntimePath("seccomp.conf")
-	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
-		return err
-	}
-
-	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
 }

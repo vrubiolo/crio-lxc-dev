@@ -3,12 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/pkg/errors"
-	"time"
-	"os"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	api "github.com/lxc/crio-lxc/clxc"
 	"github.com/rs/zerolog"
@@ -17,11 +17,15 @@ import (
 
 var log zerolog.Logger
 
+// time format used for logger
+const TimeFormatLXCMillis = "20060102150405.000"
+
 type CrioLXC struct {
 	*lxc.Container
 
 	Command string
 
+	// [ global settings ]
 	RuntimeRoot    string
 	ContainerID    string
 	LogFile        *os.File
@@ -36,14 +40,22 @@ type CrioLXC struct {
 	StartCommand   string
 	InitCommand    string
 	HookCommand    string
-	BundlePath     string
-	SpecPath       string
 
 	// feature gates
 	Seccomp       bool
 	Capabilities  bool
 	Apparmor      bool
 	CgroupDevices bool
+
+	// create flags
+	BundlePath    string
+	SpecPath      string // BundlePath + "/config.json"
+	PidFile       string
+	ConsoleSocket string
+	CreateTimeout time.Duration
+
+	// start flags
+	StartTimeout time.Duration
 }
 
 // runtime states https://github.com/opencontainers/runtime-spec/blob/v1.0.2/runtime.md
@@ -128,8 +140,6 @@ func (c CrioLXC) Release() {
 	}
 }
 
-const TimeFormatLXCMillis = "20060102150405.000"
-
 func (c *CrioLXC) configureLogging() error {
 	logDir := filepath.Dir(c.LogFilePath)
 	err := os.MkdirAll(logDir, 0750)
@@ -172,6 +182,15 @@ func (c *CrioLXC) configureLogging() error {
 		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 	}
 	return nil
+}
+
+func (c CrioLXC) CanConfigure(keys ...string) bool {
+	for _, key := range keys {
+		if !lxc.IsSupportedConfigItem(key) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *CrioLXC) GetConfigItem(key string) string {
@@ -240,14 +259,14 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 	}
 }
 
-func (clxc *CrioLXC) getContainerState() (int, string, error) { 
+func (clxc *CrioLXC) getContainerState() (int, string, error) {
 	switch state := clxc.State(); state {
 	case lxc.STARTING:
-	  return -1, stateCreating, nil
+		return -1, stateCreating, nil
 	case lxc.STOPPED:
-	  return -1, stateStopped, nil
+		return -1, stateStopped, nil
 	default:
-	  return clxc.getContainerInitState()
+		return clxc.getContainerInitState()
 	}
 }
 
@@ -323,4 +342,3 @@ func (clxc *CrioLXC) waitContainerCreated(timeout time.Duration) error {
 	}
 	return fmt.Errorf("timeout (%s) waiting for container creation", timeout)
 }
-

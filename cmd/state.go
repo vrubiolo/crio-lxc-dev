@@ -39,13 +39,12 @@ func doState(ctx *cli.Context) error {
 		Annotations: map[string]string{},
 	}
 
-  s.Pid, s.Status, err = clxc.getContainerState()
+	s.Pid, s.Status, err = clxc.getContainerState()
 
 	if stateJson, err := json.Marshal(s); err == nil {
-	  fmt.Fprint(os.Stdout, string(stateJson))
+		fmt.Fprint(os.Stdout, string(stateJson))
 	} else {
 		return errors.Wrap(err, "failed to marshal json")
 	}
 	return err
 }
-

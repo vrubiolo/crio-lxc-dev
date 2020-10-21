@@ -5,9 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/sys/unix"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	lxc "gopkg.in/lxc/go-lxc.v2"
+	"golang.org/x/sys/unix"
 )
 
 type Namespace struct {
@@ -26,12 +25,12 @@ var NamespaceMap = map[specs.LinuxNamespaceType]Namespace{
 	specs.UTSNamespace:     Namespace{"uts", unix.CLONE_NEWUTS},
 }
 
-func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
+func configureNamespaces(namespaces []specs.LinuxNamespace) error {
 	procPidPathRE := regexp.MustCompile(`/proc/(\d+)/ns`)
 
 	var configVal string
 	seenNamespaceTypes := map[specs.LinuxNamespaceType]bool{}
-	for _, ns := range spec.Linux.Namespaces {
+	for _, ns := range namespaces {
 		if _, ok := seenNamespaceTypes[ns.Type]; ok {
 			return fmt.Errorf("duplicate namespace type %s", ns.Type)
 		}
@@ -74,7 +73,7 @@ func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
 			nsToKeep = append(nsToKeep, n.Name)
 		}
 	}
-	return  clxc.SetConfigItem("lxc.namespace.keep", strings.Join(nsToKeep, " "))
+	return clxc.SetConfigItem("lxc.namespace.keep", strings.Join(nsToKeep, " "))
 }
 
 func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
