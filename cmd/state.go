@@ -39,9 +39,7 @@ const (
 	// the container process has exited (step 7 in the lifecycle)
 	stateStopped = "stopped"
 
-	// environment variable to detect container runtime states
-	// - stateCreated: crio-lxc-init is started but blocking at the syncfifo
-	// - stateRunning: crio-lxc-init has executed container process
+	// crio-lxc-init is started but blocking at the syncfifo
 	envStateCreated = "CRIO_LXC_STATE=" + stateCreated
 )
 

@@ -71,66 +71,6 @@ func TestResolveMountDestinationRelative(t *testing.T) {
 	require.Error(t, err, os.ErrExist)
 }
 
-func TestCapabilities(t *testing.T) {
-	require.NoError(t, runtimeHasCapabilitySupport("/usr/local/bin/crio-lxc-start"))
-	require.Error(t, runtimeHasCapabilitySupport("/bin/zcat"))
-}
-
-func TestKernelRelease(t *testing.T) {
-	release := "5.8.0-trunk-amd64"
-	r, err := ParseUtsnameRelease(release)
-	require.NoError(t, err)
-	require.Equal(t, "trunk-amd64", r.Suffix)
-	require.True(t, r.GreaterEqual(5, 8, 0))
-	require.True(t, r.GreaterEqual(4, 9, 0))
-	require.False(t, r.GreaterEqual(5, 8, 1))
-
-	release = "5.9.3"
-	r, err = ParseUtsnameRelease(release)
-	require.NoError(t, err)
-	require.Empty(t, r.Suffix)
-}
-
-/*
-func TestGetUser(t *testing.T) {
-	passwd := `root:x:0:0:root:/root:/bin/bash
-_apt:x:100:65534:xxx:/nonexistent:/usr/sbin/nologin
-systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin`
-
-	f, err := ioutil.TempFile("", "passwd")
-	require.NoError(t, err)
-	_, err = fmt.Fprintln(f, passwd)
-	require.NoError(t, err)
-	f.Close()
-
-	u := GetUser(f.Name(), "systemd-coredump")
-	require.NotNil(t, u)
-	require.Equal(t, "/", u.Home)
-
-	u = GetUser(f.Name(), "_apt")
-	require.NotNil(t, u)
-	require.Equal(t, "/nonexistent", u.Home)
-
-	u = GetUser(f.Name(), "root")
-	require.NotNil(t, u)
-	require.Equal(t, "/root", u.Home)
-}
-*/
-
-func TestAccessMask(t *testing.T) {
-	// setuid 4, setgid 2, sticky 1
-	require.Equal(t, "0707", accessMask(os.FileMode(0707)))
-	require.Equal(t, "1707", accessMask(0707|os.ModeSticky))
-	require.Equal(t, "1777", accessMask(os.ModePerm|os.ModeSticky))
-	require.Equal(t, "2777", accessMask(os.ModePerm|os.ModeSetgid))
-	require.Equal(t, "4777", accessMask(os.ModePerm|os.ModeSetuid))
-
-	require.Equal(t, "3777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid))
-	require.Equal(t, "5777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetuid))
-	require.Equal(t, "6777", accessMask(os.ModePerm|os.ModeSetgid|os.ModeSetuid))
-	require.Equal(t, "7777", accessMask(os.ModePerm|os.ModeSticky|os.ModeSetgid|os.ModeSetuid))
-}
-
 func TestParseSystemCgroupPath(t *testing.T) {
 	s := "kubepods-burstable-123.slice:crio:ABC"
 	cg := ParseSystemdCgroupPath(s)

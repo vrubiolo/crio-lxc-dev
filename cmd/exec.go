@@ -65,48 +65,30 @@ func doExec(ctx *cli.Context) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to unmarshal process spec")
 		}
-		// tanslate process spec to lxc.AttachOptions
 		procArgs = procSpec.Args
 		attachOpts.UID = int(procSpec.User.UID)
 		attachOpts.GID = int(procSpec.User.GID)
 		attachOpts.Cwd = procSpec.Cwd
-		// Do not inherit the parent process environment
+		// Use the environment defined by the process spec.
 		attachOpts.ClearEnv = true
 		attachOpts.Env = procSpec.Env
 
-		/* FIXME handlevalues not supported by go-lxc ?
-		   // Capabilities are Linux capabilities that are kept for the process.
-		   Capabilities *LinuxCapabilities `json:"capabilities,omitempty" platform:"linux"`
-		   // Rlimits specifies rlimit options to apply to the process.
-		   Rlimits []POSIXRlimit `json:"rlimits,omitempty" platform:"linux,solaris"`
-		   // NoNewPrivileges controls whether additional privileges could be gained by processes in the container.
-		   NoNewPrivileges bool `json:"noNewPrivileges,omitempty" platform:"linux"`
-		   // ApparmorProfile specifies the apparmor profile for the container.
-		   ApparmorProfile string `json:"apparmorProfile,omitempty" platform:"linux"`
-		   // Specify an oom_score_adj for the container.
-		   OOMScoreAdj *int `json:"oomScoreAdj,omitempty" platform:"linux"`
-		   // SelinuxLabel specifies the selinux context that the container process is run as.
-		   SelinuxLabel str
-		*/
-
 	} else {
-		// fall back to cmdline arguments
+		// Fall back to cmdline arguments.
 		if ctx.Args().Len() >= 2 {
 			procArgs = ctx.Args().Slice()[1:]
 		}
-		// FIXME load container config to determine supported namespaces ?
 	}
 
+	// Load container spec to get the list of supported namespaces.
 	spec, err := api.ReadSpec(clxc.RuntimePath(api.INIT_SPEC))
 	if err != nil {
 		return errors.Wrap(err, "failed to read container runtime spec")
 	}
-
-	// get namespaces
 	for _, ns := range spec.Linux.Namespaces {
 		n, supported := NamespaceMap[ns.Type]
 		if !supported {
-			return fmt.Errorf("can not attach to namespace %s: unsupported namespace", ns.Type)
+			return fmt.Errorf("can not attach to %s: unsupported namespace", ns.Type)
 		}
 		attachOpts.Namespaces |= n.CloneFlag
 	}
@@ -121,10 +103,10 @@ func doExec(ctx *cli.Context) error {
 	if detach {
 		pidFile := ctx.String("pid-file")
 		pid, err := c.RunCommandNoWait(procArgs, attachOpts)
-		log.Debug().Err(err).Int("pid", pid).Msg("cmd executed detached")
 		if err != nil {
 			return errors.Wrapf(err, "c.RunCommandNoWait failed")
 		}
+		log.Debug().Err(err).Int("pid", pid).Msg("cmd executed detached")
 		if pidFile == "" {
 			log.Warn().Msg("detaching process but pid-file value is empty")
 			return nil
@@ -132,10 +114,10 @@ func doExec(ctx *cli.Context) error {
 		return createPidFile(pidFile, pid)
 	} else {
 		exitStatus, err := c.RunCommandStatus(procArgs, attachOpts)
-		log.Debug().Err(err).Int("exit", exitStatus).Msg("cmd executed synchronous")
 		if err != nil {
-			return errors.Wrapf(err, "Cmd returned with exit code %d", exitStatus)
+			return errors.Wrapf(err, "c.RunCommandStatus returned with exit code %d", exitStatus)
 		}
+		log.Debug().Int("exit", exitStatus).Msg("cmd executed synchronous")
 	}
 	return nil
 }

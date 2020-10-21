@@ -114,6 +114,10 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 	return unix.Rmdir(dirName)
 }
 
+// loopKillCgroupProcs loops over PIDs in cgroup.procs and sends
+// each PID the kill signal until there are no more PIDs left.
+// Looping is required because processes that have been created (forked / exec)
+// may not 'yet' be visible in cgroup.procs.
 func loopKillCgroupProcs(scope string, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -136,10 +140,9 @@ func loopKillCgroupProcs(scope string, timeout time.Duration) error {
 
 // getCgroupProcs returns the PIDs for all processes which are in the
 // same control group as the process for which the PID is given.
-// killing is hard https://lwn.net/Articles/754980/
 func killCgroupProcs(scope string) (int, error) {
 	cgroupProcsPath := filepath.Join(scope, "cgroup.procs")
-	log.Debug().Str("path:", cgroupProcsPath).Msg("reading control group process list")
+	log.Trace().Str("path:", cgroupProcsPath).Msg("reading control group process list")
 	procsData, err := ioutil.ReadFile(cgroupProcsPath)
 	if err != nil {
 		return -1, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
@@ -156,17 +159,15 @@ func killCgroupProcs(scope string) (int, error) {
 		return 0, nil
 	}
 
+	// This indicates improper signal handling / termination of the container.
 	log.Warn().Strs("pids:", pidStrings).Str("cgroup:", scope).Msg("killing left-over container processes")
 
 	for _, s := range pidStrings {
 		pid, err := strconv.Atoi(s)
 		if err != nil {
-			// reading garbage from cgroup.procs should not happen
+			// Reading garbage from cgroup.procs should not happen.
 			return -1, errors.Wrapf(err, "failed to convert PID %q to number", s)
 		}
-		// make this process a session leader
-		// and move all process to this session leader ?
-
 		if err := unix.Kill(pid, 9); err != nil {
 			return -1, errors.Wrapf(err, "failed to kill %d", pid)
 		}

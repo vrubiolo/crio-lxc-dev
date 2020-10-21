@@ -10,6 +10,11 @@ import (
 
 const (
 	CURRENT_OCI_VERSION = "0.2.1"
+	// Environment variables are populated by default from this environment file.
+	// Existing environment variables are preserved.
+	EnvFileDefault = "/etc/default/crio-lxc"
+	// This environment variable can be used to overwrite the path in EnvFileDefault.
+	EnvFileVar = "CRIO_LXC_DEFAULTS"
 )
 
 var version string
@@ -44,26 +49,23 @@ func main() {
 			Value:       "/var/log/crio-lxc.log",
 			Destination: &clxc.LogFilePath,
 		},
-		// TODO this should be controlled by custom annotations / labels from within k8s
-		// lxc-path-keep should be on the same fileystem as lxc-path
 		&cli.StringFlag{
 			Name:        "backup-dir",
 			Usage:       "directory for container runtime directory backups",
 			EnvVars:     []string{"CRIO_LXC_BACKUP_DIR"},
-			Value:       "/var/lib/lxc-backup",
+			Value:       "/var/lib/crio-lxc/backup",
 			Destination: &clxc.BackupDir,
 		},
 		&cli.BoolFlag{
 			Name:        "backup-on-error",
-			Usage:       "backup container runtime directory when start-cmd fails",
+			Usage:       "backup container runtime directory when cmd-start fails",
 			EnvVars:     []string{"CRIO_LXC_BACKUP_ON_ERROR"},
 			Value:       true,
 			Destination: &clxc.BackupOnError,
 		},
-		// backup any container started (e.g to inspect failing init commands)
 		&cli.BoolFlag{
 			Name:        "backup",
-			Usage:       "backup the container runtime before start-cmd is called",
+			Usage:       "backup every container runtime before cmd-start is called",
 			EnvVars:     []string{"CRIO_LXC_BACKUP"},
 			Value:       false,
 			Destination: &clxc.Backup,
@@ -89,28 +91,28 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:        "cmd-init",
-			Usage:       "Absolute path to container init binary (crio-lxc-init)",
+			Usage:       "Absolute path to container init binary",
 			EnvVars:     []string{"CRIO_LXC_CMD_INIT"},
 			Value:       "/usr/local/bin/crio-lxc-init",
 			Destination: &clxc.InitCommand,
 		},
 		&cli.StringFlag{
 			Name:        "cmd-start",
-			Usage:       "Name or path to container start binary (crio-lxc-start)",
+			Usage:       "Name or path to container start binary",
 			EnvVars:     []string{"CRIO_LXC_CMD_START"},
 			Value:       "crio-lxc-start",
 			Destination: &clxc.StartCommand,
 		},
 		&cli.StringFlag{
 			Name:        "cmd-hook",
-			Usage:       "Name or path to container hook binary (crio-lxc-hook)",
+			Usage:       "Name or path to binary executed in lxc.hook.mount",
 			EnvVars:     []string{"CRIO_LXC_CMD_HOOK"},
 			Value:       "/usr/local/bin/crio-lxc-hook",
 			Destination: &clxc.HookCommand,
 		},
 		&cli.BoolFlag{
 			Name:        "seccomp",
-			Usage:       "Generate seccomp profile for lxc from container spec",
+			Usage:       "Generate and apply seccomp profile for lxc from container spec",
 			Destination: &clxc.Seccomp,
 			EnvVars:     []string{"CRIO_LXC_SECCOMP"},
 			Value:       true,
@@ -168,13 +170,12 @@ func main() {
 	}
 
 	// Disable the default error messages for cmdline errors.
-	// By default the app/cmd help is printed to stdout, which is not required hen called from cri-o.
+	// By default the app/cmd help is printed to stdout, which produces garbage in cri-o log output.
 	// Instead the cmdline is reflected to identify cmdline interface errors
 	errUsage := func(context *cli.Context, err error, isSubcommand bool) error {
 		fmt.Fprintf(os.Stderr, "usage error %s: %s\n", err, os.Args)
 		return err
 	}
-
 	app.OnUsageError = errUsage
 
 	for _, cmd := range app.Commands {
@@ -186,10 +187,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "undefined subcommand %q cmdline%s\n", cmd, os.Args)
 	}
 
-	// merge with args from cmdline ?
-	// requires a fixed config file path ?
-	envFile := "/etc/default/crio-lxc"
-	if s, isSet := os.LookupEnv("CRIO_LXC_DEFAULTS"); isSet {
+	envFile := EnvFileDefault
+	if s, isSet := os.LookupEnv(EnvFileVar); isSet {
 		envFile = s
 	}
 	if err := loadEnvDefaults(envFile); err != nil {
@@ -198,7 +197,11 @@ func main() {
 	}
 
 	err := app.Run(os.Args)
-	log.Info().Err(err).Msg("done")
+	if err != nil {
+		log.Error().Err(err).Msg("cmd failed")
+	} else {
+		log.Debug().Msg("cmd done")
+	}
 	clxc.Release()
 	if err != nil {
 		// write diagnostics message to stderr for crio/kubelet

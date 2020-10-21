@@ -1,23 +1,18 @@
-// Allow Setns to be called safely
-// https://github.com/vishvananda/netns/issues/17
 // +build go1.10
 
 package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
-	lxc "gopkg.in/lxc/go-lxc.v2"
+	"gopkg.in/lxc/go-lxc.v2"
 )
 
 var killCmd = cli.Command{
@@ -30,6 +25,9 @@ var killCmd = cli.Command{
 [signal] name (without SIG) or signal num ?
 `,
 }
+
+const SIGZERO = unix.Signal(0)
+
 var signalMap = map[string]unix.Signal{
 	"ABRT":   unix.SIGABRT,
 	"ALRM":   unix.SIGALRM,
@@ -91,89 +89,6 @@ func safeGetInitPid(c *lxc.Container) (int, *os.File, error) {
 	}
 	return pid, proc, nil
 }
-
-// getCgroupProcs returns the PIDs for all processes which are in the
-// same control group as the process for which the PID is given.
-func getCgroupProcs(pid int) ([]int, error) {
-	procCgroup := fmt.Sprintf("/proc/%d/cgroup", pid)
-
-	data, err := ioutil.ReadFile(procCgroup)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read %s", procCgroup)
-	}
-	// see 'man 7 cgroups #/proc files'
-	// for cgroup2 unified hierarchy the format is '0::{path relative to cgroup mount}'
-	parts := strings.SplitN(string(data), ":", 3)
-	if len(parts) != 3 {
-		return nil, errors.Wrapf(err, "unsupported proc cgroup format: %s", data)
-	}
-	if parts[0] != "0" {
-		return nil, fmt.Errorf("expected cgroups 2 identifier in cgroup file: %s", data)
-	}
-
-	cgroupPath := strings.TrimSpace(parts[2])
-	cgroupProcsPath := filepath.Join("/sys/fs/cgroup", cgroupPath, "cgroup.procs")
-	log.Debug().Str("path:", cgroupProcsPath).Msg("reading control group process list")
-	procsData, err := ioutil.ReadFile(cgroupProcsPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
-	}
-	// cgroup.procs contains one PID per line and is newline separated.
-	// A trailing newline is always present.
-	pidStrings := strings.Split(strings.TrimSpace(string(procsData)), "\n")
-	if len(pidStrings) == 0 {
-		log.Warn().Msg("cgroup.procs is empty - it should contain at least the init process PID?")
-		return nil, nil
-	}
-
-	pids := make([]int, 0, len(pidStrings))
-	for _, s := range pidStrings {
-		pid, err := strconv.Atoi(s)
-		if err != nil {
-			// reading garbage from cgroup.procs should not happen
-			return nil, errors.Wrapf(err, "failed to convert PID %q to number", s)
-		}
-		pids = append(pids, pid)
-	}
-	return pids, nil
-}
-
-/*
-func killContainer(c *lxc.Container, signum unix.Signal) error {
-  }
-
-
-
-	err := c.Freeze()
-	if err != nil {
-		log.Warn().Msg("failed to freeze container")
-	} else {
-		defer c.Unfreeze()
-	}
-	pid := c.InitPid()
-	if pid < 1 {
-		return fmt.Errorf("expected init pid > 0, but was %d", pid)
-	}
-	  log.Debug().Int("pid:", pid).Msg("container init PID")
-	  pids, err := getCgroupProcs(pid)
-	  if err != nil {
-		  return err
-	  }
-	  log.Debug().Ints("pids:", pids).Str("sig:", signum.String()).Msg("killing container processes")
-	  for _, pid := range pids {
-		  if err := unix.Kill(pid, signum); err != nil {
-			  return errors.Wrapf(err, "failed to send signum:%d(%s)", signum, signum)
-		  }
-	  }
-	}
-	if signum == unix.SIGTERM {
-	  c.Stop()
-
-	return nil
-}
-*/
-
-const SIGZERO = unix.Signal(0)
 
 func getSignal(ctx *cli.Context) (unix.Signal, error) {
 	sig := ctx.Args().Get(1)

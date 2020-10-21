@@ -29,7 +29,6 @@ var createCmd = cli.Command{
 	Action:    doCreate,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			// Is the bundle directory the runtime-root ?
 			Name:        "bundle",
 			Usage:       "set bundle directory",
 			Value:       ".",
@@ -57,7 +56,7 @@ type Namespace struct {
 	CloneFlag int
 }
 
-// maps from CRIO namespace names to LXC names
+// maps from CRIO namespace names to LXC names and clone flags
 var NamespaceMap = map[specs.LinuxNamespaceType]Namespace{
 	specs.CgroupNamespace:  Namespace{"cgroup", unix.CLONE_NEWCGROUP},
 	specs.IPCNamespace:     Namespace{"ipc", unix.CLONE_NEWIPC},
@@ -354,8 +353,6 @@ func configureApparmor(c *lxc.Container, spec *specs.Spec) error {
 	if !clxc.Apparmor {
 		return nil
 	}
-	// TODO warn if apparmor is not available in liblxc
-
 	// The value *apparmor_profile*  from crio.conf is used if no profile is defined by the container.
 	aaprofile := spec.Process.ApparmorProfile
 	if aaprofile == "" {
@@ -457,7 +454,7 @@ func addDevicePerms(spec *specs.Spec, devType string, major *int64, minor *int64
 	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, devCgroup)
 }
 
-// ensureDefaultDevices adds the mandatory devices defined in https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#default-devices
+// ensureDefaultDevices adds the mandatory devices defined by the [runtime spec](https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#default-devices)
 // to the given container spec if required.
 // crio can add devices to containers, but this does not work for privileged containers.
 // See https://github.com/cri-o/cri-o/blob/a705db4c6d04d7c14a4d59170a0ebb4b30850675/server/container_create_linux.go#L45
@@ -530,7 +527,6 @@ func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Sp
 	}
 
 	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
-	// cgroup already exists ( created by crio )
 	if err := clxc.SetConfigItem("lxc.cgroup.relative", "0"); err != nil {
 		return err
 	}
@@ -769,24 +765,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		}
 	}
 
-	// The hostname has to be on a shared namespace
-	// when we still have the capability to do so (CAP_SYS_ADMIN)
-	// TODO  why does neither cri-o nor lxc set the hostname?
-	// FIXME avoid to call external command nsenter
-	/*
-		if spec.Hostname != "" {
-			for _, ns := range spec.Linux.Namespaces {
-				if ns.Type == specs.UTSNamespace && ns.Path != "" {
-					err := RunCommand("nsenter", "--uts="+ns.Path, "hostnamectl", "set-hostname", spec.Hostname)
-					if err != nil {
-						return errors.Wrap(err, "failed to set hostname")
-					}
-					break
-				}
-			}
-		}
-	*/
-
 	// pass context information as environment variables to hook scripts
 	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
 		return err
@@ -925,10 +903,11 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeout time.Duration) error {
 	configFilePath := clxc.RuntimePath("config")
 	cmd := exec.Command(clxc.StartCommand, c.Name(), clxc.RuntimeRoot, configFilePath)
-	// clear environment
-	// if environment is non-empty e.g /etc/crio/crio.conf specifies conmon_env (other than PATH)
-	// then lxc does not export lxc.environment variables ....
-	// so we can set the process environment here if we want
+	// Start container with a clean environment.
+	// LXC will export variables defined in the config lxc.environment.
+	// The environment variables defined by the container spec are exported within the init cmd CRIO_LXC_INIT_CMD.
+	// This is required because environment variables defined by containers contain newlines and other tokens
+	// that can not be handled properly by lxc.
 	cmd.Env = []string{}
 
 	if consoleSocket := ctx.String("console-socket"); consoleSocket != "" {
@@ -938,9 +917,8 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 		return startConsole(cmd, consoleSocket)
 	}
 	if !spec.Process.Terminal {
-		// Inherit stdio from calling process (conmon)
-		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY
-		// see https://github.com/lxc/lxc/blob/531e0128036542fb959b05eceec78e52deefafe0/src/lxc/start.c#L1252
+		// Inherit stdio from calling process (conmon).
+		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY by lxc
 		if err := clxc.SetConfigItem("lxc.console.path", "none"); err != nil {
 			return errors.Wrap(err, "failed to disable PTY")
 		}
@@ -962,9 +940,9 @@ func startContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec, timeou
 		return err
 	}
 
-	log.Debug().Msg("waiting for PID file")
 	pidfile := ctx.String("pid-file")
 	if pidfile != "" {
+		log.Debug().Str("path:", pidfile).Msg("creating PID file")
 		err := createPidFile(pidfile, cmd.Process.Pid)
 		if err != nil {
 			return err

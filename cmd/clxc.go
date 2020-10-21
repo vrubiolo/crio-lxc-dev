@@ -51,27 +51,14 @@ func (c CrioLXC) VersionString() string {
 var ErrExist = errors.New("container already exists")
 var ErrContainerNotExist = errors.New("container does not exist")
 
-// RuntimePath builds an absolute filepath which is relative to the containers runtime root.
+// RuntimePath builds an absolute filepath which is relative to the container runtime root.
 func (c *CrioLXC) RuntimePath(subPath ...string) string {
 	return filepath.Join(c.RuntimeRoot, c.ContainerID, filepath.Join(subPath...))
 }
 
-/*
-// todo create methods to create files in RuntimePath that is bind mounted into the container
-func(c *CrioLXC) Share(runtimePath, containerPath string) {
-}
-
-func(c *CrioLXC) SharedPath(subPath ...string) string {
-}
-
-func(c *CrioLXC) RootfsPath(subPath ...string) string {
-
-}
-*/
-
 func (c *CrioLXC) LoadContainer() error {
-	// check for container existence by looking for config file.
-	// otherwise NewContainer will return an empty container
+	// Check for container existence by looking for config file.
+	// Otherwise lxc.NewContainer will return an empty container
 	// struct and we'll report wrong info
 	configExists, err := pathExists(c.RuntimePath("config"))
 	if err != nil {
@@ -122,12 +109,8 @@ func (c CrioLXC) Release() {
 	}
 }
 
-//2020 10 08 14 25 13.908
-//   RFC3339     = "2006-01-02T15:04:05Z07:00"
-var TimeFormatLXCMillis = "20060102150405.000"
+const TimeFormatLXCMillis = "20060102150405.000"
 
-// By default logging is done on a container base
-// log-dir /lxc-path/{container id}/{lxc.log, crio-lxc.log}
 func (c *CrioLXC) configureLogging() error {
 	logDir := filepath.Dir(c.LogFilePath)
 	err := os.MkdirAll(logDir, 0750)
@@ -146,7 +129,7 @@ func (c *CrioLXC) configureLogging() error {
 	zerolog.MessageFieldName = "m"
 	zerolog.TimeFieldFormat = TimeFormatLXCMillis
 
-	// It's not possible change the possition of the timestamp.
+	// NOTE It's not possible change the possition of the timestamp.
 	// The ttimestamp is appended to the to the log output because it is dynamically rendered
 	// see https://github.com/rs/zerolog/issues/109
 	log = zerolog.New(f).With().Timestamp().Str("cmd:", c.Command).Str("cid:", c.ContainerID).Logger()
@@ -195,7 +178,7 @@ func (c *CrioLXC) SetConfigItem(key, value string) error {
 	return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
 }
 
-// BackupRuntimeDirectory creates a backup of the container runtime resources.
+// BackupRuntimeResources creates a backup of the container runtime resources.
 // It returns the path to the backup directory.
 //
 // The following resources are backed up:
