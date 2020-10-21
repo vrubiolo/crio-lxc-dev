@@ -276,15 +276,31 @@ func defaultAction(seccomp *specs.LinuxSeccomp) (string, error) {
 		return "errno 0", nil
 	case specs.ActAllow:
 		return "allow", nil
-		// Not (yet) supported by lxc
-	case specs.ActTrace:
-		fallthrough
-	case specs.ActLog:
+	case specs.ActTrace, specs.ActLog: // Not (yet) supported by lxc
+		log.Warn().Str("action:", string(seccomp.DefaultAction)).Msg("unsupported seccomp default action")
 		fallthrough
 	//case specs.ActKillProcess: fallthrough // specs > 1.0.2
 	default:
 		return "kill", fmt.Errorf("Unsupported seccomp default action %q", seccomp.DefaultAction)
 	}
+}
+
+func seccompArchs(seccomp *specs.LinuxSeccomp) ([]string, error) {
+	var uts unix.Utsname
+	if err := unix.Uname(&uts); err != nil {
+		return nil, err
+	}
+	nativeArch := nullTerminatedString(uts.Machine[:])
+	archs := make([]string, len(seccomp.Architectures))
+	for _, a := range seccomp.Architectures {
+		s := strings.ToLower(strings.TrimLeft(string(a), "SCMP_ARCH_"))
+		if strings.ToLower(nativeArch) == s {
+			// lxc seccomp code automatically adds syscalls to compat architectures
+			return []string{nativeArch}, nil
+		}
+		archs = append(archs, s)
+	}
+	return archs, nil
 }
 
 func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
@@ -304,23 +320,19 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 	}
 	fmt.Fprintf(w, "allowlist %s\n", action)
 
-	w.WriteString("[x86_64]\n")
-	for _, sc := range seccomp.Syscalls {
-		if err := writeSeccompSyscall(w, sc); err != nil {
-			return err
-		}
+	platformArchs, err := seccompArchs(seccomp)
+	if err != nil {
+		return errors.Wrap(err, "Failed to detect platform architecture")
 	}
-	/*
-		for _, arch := range seccomp.Architectures {
-			archName := strings.TrimLeft(string(arch), "SCMP_ARCH_")
-			fmt.Fprintf(w, "[%s]\n", archName)
-			for _, sc := range seccomp.Syscalls {
-				if err := writeSeccompSyscall(w, sc); err != nil {
-					return err
-				}
+	log.Debug().Str("action:", action).Strs("archs:", platformArchs).Msg("create seccomp profile")
+	for _, arch := range platformArchs {
+		fmt.Fprintf(w, "[%s]\n", arch)
+		for _, sc := range seccomp.Syscalls {
+			if err := writeSeccompSyscall(w, sc); err != nil {
+				return err
 			}
 		}
-	*/
+	}
 	return nil
 }
 

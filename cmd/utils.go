@@ -201,3 +201,8 @@ func loadEnvDefaults(envFile string) error {
 	}
 	return nil
 }
+
+func nullTerminatedString(data []byte) string {
+	i := bytes.Index(data, []byte{0})
+	return string(data[:i])
+}
