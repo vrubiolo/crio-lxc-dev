@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -49,22 +47,6 @@ var createCmd = cli.Command{
 			Value:   time.Second * 5,
 		},
 	},
-}
-
-type Namespace struct {
-	Name      string
-	CloneFlag int
-}
-
-// maps from CRIO namespace names to LXC names and clone flags
-var NamespaceMap = map[specs.LinuxNamespaceType]Namespace{
-	specs.CgroupNamespace:  Namespace{"cgroup", unix.CLONE_NEWCGROUP},
-	specs.IPCNamespace:     Namespace{"ipc", unix.CLONE_NEWIPC},
-	specs.MountNamespace:   Namespace{"mnt", unix.CLONE_NEWNS},
-	specs.NetworkNamespace: Namespace{"net", unix.CLONE_NEWNET},
-	specs.PIDNamespace:     Namespace{"pid", unix.CLONE_NEWPID},
-	specs.UserNamespace:    Namespace{"user", unix.CLONE_NEWUSER},
-	specs.UTSNamespace:     Namespace{"uts", unix.CLONE_NEWUTS},
 }
 
 func createInitSpec(spec *specs.Spec) error {
@@ -122,62 +104,6 @@ func createInitSpec(spec *specs.Spec) error {
 	return clxc.SetConfigItem("lxc.init.cmd", api.INIT_CMD)
 }
 
-func configureNamespaces(c *lxc.Container, spec *specs.Spec) error {
-	procPidPathRE := regexp.MustCompile(`/proc/(\d+)/ns`)
-
-	var configVal string
-	seenNamespaceTypes := map[specs.LinuxNamespaceType]bool{}
-	for _, ns := range spec.Linux.Namespaces {
-		if _, ok := seenNamespaceTypes[ns.Type]; ok {
-			return fmt.Errorf("duplicate namespace type %s", ns.Type)
-		}
-		seenNamespaceTypes[ns.Type] = true
-		if ns.Path == "" {
-			continue
-		}
-
-		n, supported := NamespaceMap[ns.Type]
-		if !supported {
-			return fmt.Errorf("Unsupported namespace %s", ns.Type)
-		}
-		configKey := fmt.Sprintf("lxc.namespace.share.%s", n.Name)
-
-		matches := procPidPathRE.FindStringSubmatch(ns.Path)
-		switch len(matches) {
-		case 0:
-			configVal = ns.Path
-		case 1:
-			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-		case 2:
-			configVal = matches[1]
-		default:
-			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-		}
-
-		if err := clxc.SetConfigItem(configKey, configVal); err != nil {
-			return err
-		}
-	}
-
-	// Note  that  if the container requests a new user namespace and the container wants to in‐
-	// herit the network namespace it needs to inherit the user namespace as well.
-	if !seenNamespaceTypes[specs.NetworkNamespace] && seenNamespaceTypes[specs.UserNamespace] {
-		return fmt.Errorf("to inherit the network namespace the user namespace must be inherited as well")
-	}
-
-	nsToKeep := make([]string, 0, len(NamespaceMap))
-	for key, n := range NamespaceMap {
-		if !seenNamespaceTypes[key] {
-			nsToKeep = append(nsToKeep, n.Name)
-		}
-	}
-	if err := clxc.SetConfigItem("lxc.namespace.keep", strings.Join(nsToKeep, " ")); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func doCreate(ctx *cli.Context) error {
 	err := doCreateInternal(ctx)
 	if clxc.Backup || (err != nil && clxc.BackupOnError) {
@@ -233,133 +159,7 @@ func doCreateInternal(ctx *cli.Context) error {
 	return startContainer(ctx, c, spec, ctx.Duration("timeout"))
 }
 
-var seccompAction = map[specs.LinuxSeccompAction]string{
-	specs.ActKill:  "kill",
-	specs.ActTrap:  "trap",
-	specs.ActErrno: "errno",
-	specs.ActAllow: "allow",
-	//specs.ActTrace: "trace",
-	//specs.ActLog: "log",
-	//specs.ActKillProcess: "kill_process",
-}
 
-func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
-	for _, name := range sc.Names {
-		action, ok := seccompAction[sc.Action]
-		if !ok {
-			return fmt.Errorf("unsupported seccomp action: %s", sc.Action)
-		}
-		if len(sc.Args) == 0 {
-			fmt.Fprintf(w, "%s %s\n", name, action)
-		} else {
-			// Only write a single argument per line - this is required when the same arg.Index is used multiple times.
-			// from `man 7 seccomp_rule_add_exact_array`
-			// "When adding syscall argument comparisons to the filter it is important to remember
-			// that while it is possible to have multiple comparisons in a single rule,
-			// you can only compare each argument once in a single rule.
-			// In other words, you can not have multiple comparisons of the 3rd syscall argument in a single rule."
-			for _, arg := range sc.Args {
-				fmt.Fprintf(w, "%s %s [%d,%d,%s,%d]\n", name, action, arg.Index, arg.Value, arg.Op, arg.ValueTwo)
-			}
-		}
-	}
-	return nil
-}
-
-func defaultAction(seccomp *specs.LinuxSeccomp) (string, error) {
-	switch seccomp.DefaultAction {
-	case specs.ActKill:
-		return "kill", nil
-	case specs.ActTrap:
-		return "trap", nil
-	case specs.ActErrno:
-		return "errno 0", nil
-	case specs.ActAllow:
-		return "allow", nil
-	case specs.ActTrace, specs.ActLog: // Not (yet) supported by lxc
-		log.Warn().Str("action:", string(seccomp.DefaultAction)).Msg("unsupported seccomp default action")
-		fallthrough
-	//case specs.ActKillProcess: fallthrough // specs > 1.0.2
-	default:
-		return "kill", fmt.Errorf("Unsupported seccomp default action %q", seccomp.DefaultAction)
-	}
-}
-
-func seccompArchs(seccomp *specs.LinuxSeccomp) ([]string, error) {
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err != nil {
-		return nil, err
-	}
-	nativeArch := nullTerminatedString(uts.Machine[:])
-	archs := make([]string, len(seccomp.Architectures))
-	for _, a := range seccomp.Architectures {
-		s := strings.ToLower(strings.TrimLeft(string(a), "SCMP_ARCH_"))
-		if strings.ToLower(nativeArch) == s {
-			// lxc seccomp code automatically adds syscalls to compat architectures
-			return []string{nativeArch}, nil
-		}
-		archs = append(archs, s)
-	}
-	return archs, nil
-}
-
-func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
-	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)
-	if err != nil {
-		return err
-	}
-	defer profile.Close()
-
-	w := bufio.NewWriter(profile)
-	defer w.Flush()
-
-	w.WriteString("2\n")
-	action, err := defaultAction(seccomp)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "allowlist %s\n", action)
-
-	platformArchs, err := seccompArchs(seccomp)
-	if err != nil {
-		return errors.Wrap(err, "Failed to detect platform architecture")
-	}
-	log.Debug().Str("action:", action).Strs("archs:", platformArchs).Msg("create seccomp profile")
-	for _, arch := range platformArchs {
-		fmt.Fprintf(w, "[%s]\n", arch)
-		for _, sc := range seccomp.Syscalls {
-			if err := writeSeccompSyscall(w, sc); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func configureSeccomp(c *lxc.Container, spec *specs.Spec) error {
-	if !clxc.Seccomp {
-		return nil
-	}
-
-	if spec.Linux.Seccomp == nil || len(spec.Linux.Seccomp.Syscalls) == 0 {
-		return nil
-	}
-
-	// TODO warn if seccomp is not available in liblxc
-
-	if spec.Process.NoNewPrivileges {
-		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
-			return err
-		}
-	}
-
-	profilePath := clxc.RuntimePath("seccomp.conf")
-	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
-		return err
-	}
-
-	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
-}
 
 func configureApparmor(c *lxc.Container, spec *specs.Spec) error {
 	if !clxc.Apparmor {
@@ -508,190 +308,6 @@ func ensureDefaultDevices(spec *specs.Spec) error {
 	return nil
 }
 
-// https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config-linux.md
-// TODO New spec will contain a property Unified for cgroupv2 properties
-// https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#unified
-func configureCgroupResources(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
-	linux := spec.Linux
-
-	if linux.CgroupsPath != "" {
-		if clxc.SystemdCgroup {
-			cgPath := ParseSystemdCgroupPath(linux.CgroupsPath)
-			// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
-			// checking for on of the config items shuld be enough, because they were introduced together ...
-			if lxc.IsSupportedConfigItem("lxc.cgroup.dir.container") && lxc.IsSupportedConfigItem("lxc.cgroup.dir.monitor") {
-				if err := clxc.SetConfigItem("lxc.cgroup.dir.container", cgPath.String()); err != nil {
-					return err
-				}
-				if err := clxc.SetConfigItem("lxc.cgroup.dir.monitor", filepath.Join(clxc.MonitorCgroup, c.Name()+".scope")); err != nil {
-					return err
-				}
-			} else {
-				if err := clxc.SetConfigItem("lxc.cgroup.dir", cgPath.String()); err != nil {
-					return err
-				}
-			}
-		} else {
-			if err := clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath); err != nil {
-				return err
-			}
-		}
-	}
-
-	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
-	if err := clxc.SetConfigItem("lxc.cgroup.relative", "0"); err != nil {
-		return err
-	}
-
-	if err := configureCgroupDevices(spec); err != nil {
-		return err
-	}
-
-	// Memory restriction configuration
-	if mem := linux.Resources.Memory; mem != nil {
-		log.Debug().Msg("TODO configure cgroup memory controller")
-	}
-	// CPU resource restriction configuration
-	if cpu := linux.Resources.CPU; cpu != nil {
-		// use strconv.FormatUint(n, 10) instead of fmt.Sprintf ?
-		log.Debug().Msg("TODO configure cgroup cpu controller")
-		/*
-			if cpu.Shares != nil && *cpu.Shares > 0 {
-					if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
-						return err
-					}
-			}
-			if cpu.Quota != nil && *cpu.Quota > 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
-					return err
-				}
-			}
-				if cpu.Period != nil && *cpu.Period != 0 {
-					if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
-						return err
-					}
-				}
-			if cpu.Cpus != "" {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
-					return err
-				}
-			}
-			if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
-					return err
-				}
-			}
-			if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
-					return err
-				}
-			}
-		*/
-		// Mems string `json:"mems,omitempty"`
-	}
-
-	// Task resource restriction configuration.
-	if pids := linux.Resources.Pids; pids != nil {
-		if err := clxc.SetConfigItem("lxc.cgroup2.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
-			return err
-		}
-	}
-	// BlockIO restriction configuration
-	if blockio := linux.Resources.BlockIO; blockio != nil {
-		log.Debug().Msg("TODO configure cgroup blockio controller")
-	}
-	// Hugetlb limit (in bytes)
-	if hugetlb := linux.Resources.HugepageLimits; hugetlb != nil {
-		log.Debug().Msg("TODO configure cgroup hugetlb controller")
-	}
-	// Network restriction configuration
-	if net := linux.Resources.Network; net != nil {
-		log.Debug().Msg("TODO configure cgroup network controllers")
-	}
-	return nil
-}
-
-func configureCgroupDevices(spec *specs.Spec) error {
-	if err := ensureDefaultDevices(spec); err != nil {
-		return errors.Wrapf(err, "failed to add default devices")
-	}
-
-	devicesAllow := "lxc.cgroup2.devices.allow"
-	devicesDeny := "lxc.cgroup2.devices.deny"
-
-	if !clxc.CgroupDevices {
-		// allow read-write-mknod access to all char and block devices
-		if err := clxc.SetConfigItem(devicesAllow, "b *:* rwm"); err != nil {
-			return err
-		}
-		if err := clxc.SetConfigItem(devicesAllow, "c *:* rwm"); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Set cgroup device permissions from spec.
-	// Device rule parsing in LXC is not well documented in lxc.container.conf
-	// see https://github.com/lxc/lxc/blob/79c66a2af36ee8e967c5260428f8cdb5c82efa94/src/lxc/cgroups/cgfsng.c#L2545
-	// Mixing allow/deny is not permitted by lxc.cgroup2.devices.
-	// Best practise is to build up an allow list to disable access restrict access to new/unhandled devices.
-
-	anyDevice := ""
-	blockDevice := "b"
-	charDevice := "c"
-
-	for _, dev := range spec.Linux.Resources.Devices {
-		key := devicesDeny
-		if dev.Allow {
-			key = devicesAllow
-		}
-
-		maj := "*"
-		if dev.Major != nil {
-			maj = fmt.Sprintf("%d", *dev.Major)
-		}
-
-		min := "*"
-		if dev.Minor != nil {
-			min = fmt.Sprintf("%d", *dev.Minor)
-		}
-
-		switch dev.Type {
-		case anyDevice:
-			// do not deny any device, this will also deny access to default devices
-			if !dev.Allow {
-				continue
-			}
-			// decompose
-			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-			val = fmt.Sprintf("%s %s:%s %s", charDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-		case blockDevice, charDevice:
-			val := fmt.Sprintf("%s %s:%s %s", dev.Type, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("Invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
-		}
-	}
-	return nil
-}
-
-func isNamespaceEnabled(spec *specs.Spec, nsType specs.LinuxNamespaceType) bool {
-	for _, ns := range spec.Linux.Namespaces {
-		if ns.Type == nsType {
-			return true
-		}
-	}
-	return false
-}
-
 func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) error {
 	if ctx.Bool("debug") {
 		c.SetVerbosity(lxc.Verbose)
@@ -721,46 +337,8 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		return err
 	}
 
-	// excplicitly disable auto-mounting
-	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
-		return err
-	}
-
-	for _, ms := range spec.Mounts {
-		if ms.Type == "cgroup" {
-			// TODO check if hieararchy is cgroup v2 only (unified mode)
-			ms.Type = "cgroup2"
-			ms.Source = "cgroup2"
-			// cgroup filesystem is automounted even with lxc.rootfs.managed = 0
-			// from 'man lxc.container.conf':
-			// If cgroup namespaces are enabled, then any cgroup auto-mounting request will be ignored,
-			// since the container can mount the filesystems itself, and automounting can confuse the container.
-		}
-
-		// TODO replace with symlink.FollowSymlinkInScope(filepath.Join(rootfs, "/etc/passwd"), rootfs) ?
-		// "github.com/docker/docker/pkg/symlink"
-		mountDest, err := resolveMountDestination(spec.Root.Path, ms.Destination)
-		// Intermediate path resolution failed. This is not an error, since
-		// the remaining directories / files are automatically created (create=dir|file)
-		log.Trace().Err(err).Str("dst:", ms.Destination).Str("effective:", mountDest).Msg("resolve mount destination")
-
-		// Check whether the resolved destination of the target link escapes the rootfs.
-		if !filepath.HasPrefix(mountDest, spec.Root.Path) {
-			// refuses mount destinations that escape from rootfs
-			return fmt.Errorf("security violation: resolved mount destination path %s escapes from container root %s", mountDest, spec.Root.Path)
-		}
-		ms.Destination = mountDest
-
-		err = createMountDestination(spec, &ms)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create mount destination %s", ms.Destination)
-		}
-
-		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, strings.Join(ms.Options, ","))
-
-		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
-			return err
-		}
+	if err := configureMounts(spec); err != nil {
+	  return err
 	}
 
 	rootmnt := spec.Root.Path
@@ -805,49 +383,6 @@ func configureContainer(ctx *cli.Context, c *lxc.Container, spec *specs.Spec) er
 		if err := clxc.SetConfigItem("lxc.sysctl."+key, val); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// createMountDestination creates non-existent mount destination paths.
-// This is required if rootfs is mounted readonly.
-// When the source is a file that should be bind mounted a destination file is created.
-// In any other case a target directory is created.
-// We add 'create=dir' or 'create=file' to mount options because the mount destination
-// may be shadowed by a previous mount. In this case lxc will create the mount destination.
-// TODO check whether this is  desired behaviour in lxc ?
-// Shouldn't the rootfs should be mounted readonly after all mounts destination directories have been created ?
-// https://github.com/lxc/lxc/issues/1702
-func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
-	info, err := os.Stat(ms.Source)
-	if err != nil && ms.Type == "bind" {
-		// check if mountpoint is optional ?
-		return errors.Wrapf(err, "failed to access source %s for bind mount", ms.Source)
-	}
-
-	if err == nil && !info.IsDir() {
-		ms.Options = append(ms.Options, "create=file")
-		// source exists and is not a directory
-		// create a target file that can be used as target for a bind mount
-		err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
-		log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create parent directory for file bind mount")
-		if err != nil {
-			return errors.Wrap(err, "failed to create mount destination dir")
-		}
-		f, err := os.OpenFile(ms.Destination, os.O_CREATE, 0440)
-		log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create file bind mount destination")
-		if err != nil {
-			return errors.Wrap(err, "failed to create file mountpoint")
-		}
-		return f.Close()
-	}
-	ms.Options = append(ms.Options, "create=dir")
-	// FIXME exclude all directories that are below other mounts
-	// only directories / files on the readonly rootfs must be created
-	err = os.MkdirAll(ms.Destination, 0755)
-	log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
-	if err != nil {
-		return errors.Wrap(err, "failed to create mount destination")
 	}
 	return nil
 }
@@ -981,3 +516,4 @@ func waitContainerCreated(c *lxc.Container, timeout time.Duration) error {
 	}
 	return fmt.Errorf("timeout (%s) waiting for container creation", timeout)
 }
+
