@@ -41,6 +41,8 @@ func configureSeccomp(spec *specs.Spec) error {
 	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
 }
 
+// Note seccomp flags (see `man 2 seccomp`) are currently not supported 
+// https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config-linux.md#seccomp
 func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
 	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)
 	if err != nil {
@@ -99,6 +101,9 @@ func seccompArchs(seccomp *specs.LinuxSeccomp) ([]string, error) {
 		return nil, err
 	}
 	nativeArch := nullTerminatedString(uts.Machine[:])
+	if len(seccomp.Architectures) == 0 {
+		return []string{nativeArch}, nil
+	}
 	archs := make([]string, len(seccomp.Architectures))
 	for _, a := range seccomp.Architectures {
 		s := strings.ToLower(strings.TrimLeft(string(a), "SCMP_ARCH_"))
