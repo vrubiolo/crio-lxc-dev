@@ -79,6 +79,11 @@ func configureCgroupPath(linux *specs.Linux) error {
 			return err
 		}
 	}
+	if clxc.CanConfigure("lxc.cgroup.dir.monitor.pivot") {
+		if err := clxc.SetConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
