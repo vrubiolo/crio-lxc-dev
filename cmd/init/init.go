@@ -1,12 +1,14 @@
 package main
 
 import (
-	"github.com/lxc/crio-lxc/clxc"
-	"golang.org/x/sys/unix"
 	"os"
 	"os/user"
 	"os/exec"
 	"strings"
+
+	//caps "kernel.org/pub/linux/libs/security/libcap/cap"
+	"github.com/lxc/crio-lxc/clxc"
+	"golang.org/x/sys/unix"
 )
 
 func fail(err error, step string) {
@@ -29,15 +31,33 @@ func main() {
 		fail(err, "write to sync fifo")
 	}
 
-	if clxc.HasCapability(spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {
-		gids := make([]int, len(spec.Process.User.AdditionalGids))
-		for _, gid := range spec.Process.User.AdditionalGids {
-			gids = append(gids, int(gid))
-		}
-		err := unix.Setgroups(gids)
-		if err != nil {
-			fail(err, "setgroups")
-		}
+  /*
+  c := caps.GetProc()
+  capSetgid, err :=  c.GetFlag(caps.SETGID, caps.Effective)
+  if err != nil {
+    fail(err, "caps get setgid")
+  }
+  */
+	if capSetgid && len(spec.Process.User.AdditionalGids) > 0 {
+		  gids := make([]int, len(spec.Process.User.AdditionalGids))
+		  for _, gid := range spec.Process.User.AdditionalGids {
+			  gids = append(gids, int(gid))
+		  }
+
+		  err := caps.SetGroups(int(spec.Process.User.UID), gids)
+		  if err != nil {
+			  fail(err, "setgroups")
+		  }
+	  }
+	}
+
+  capSetuid, err :=  c.GetFlag(caps.SETUID, caps.Effective)
+  if err != nil {
+    fail(err, "caps get setuid")
+  }
+	err := caps.SetUID(int(spec.Process.User.UID))
+	if err != nil {
+		fail(err, "setuid")
 	}
 
 	env := setHome(spec.Process.Env, spec.Process.User.Username, spec.Process.Cwd)
