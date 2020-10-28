@@ -294,11 +294,10 @@ func configureInit(spec *specs.Spec) error {
 }
 
 func configureReadonlyPaths(spec *specs.Spec) error {
-	rootmnt := spec.Root.Path
 	// lxc handles read-only remount automatically, so no need for an additional remount entry
 	for _, p := range spec.Linux.ReadonlyPaths {
-		src := filepath.Join(rootmnt, p)
-		mnt := fmt.Sprintf("%s %s %s %s", src, strings.TrimLeft(p, "/"), "none", "bind,ro,optional")
+		rel := strings.TrimLeft(p, "/")
+		mnt := fmt.Sprintf("%s %s %s %s", rel, rel, "none", "bind,ro,optional")
 		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
 			return errors.Wrap(err, "failed to make path readonly")
 		}
