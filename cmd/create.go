@@ -173,6 +173,14 @@ func configureContainer(spec *specs.Spec) error {
 		log.Warn().Msg("capabilities are disabled")
 	}
 
+  // TODO extract all uid/gid related settings into separate function configureUserAndGroups
+	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
+		return err
+	}
+	if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
+		return err
+	}
+
 	// TODO ensure that the user namespace is enabled
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
@@ -276,13 +284,6 @@ func configureInit(spec *specs.Spec) error {
 		return err
 	}
 	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
-		return err
-	}
-
-	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
-		return err
-	}
-	if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
 		return err
 	}
 
