@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -26,9 +25,6 @@ var NamespaceMap = map[specs.LinuxNamespaceType]Namespace{
 }
 
 func configureNamespaces(namespaces []specs.LinuxNamespace) error {
-	procPidPathRE := regexp.MustCompile(`/proc/(\d+)/ns`)
-
-	var configVal string
 	seenNamespaceTypes := map[specs.LinuxNamespaceType]bool{}
 	for _, ns := range namespaces {
 		if _, ok := seenNamespaceTypes[ns.Type]; ok {
@@ -44,20 +40,7 @@ func configureNamespaces(namespaces []specs.LinuxNamespace) error {
 			return fmt.Errorf("Unsupported namespace %s", ns.Type)
 		}
 		configKey := fmt.Sprintf("lxc.namespace.share.%s", n.Name)
-
-		matches := procPidPathRE.FindStringSubmatch(ns.Path)
-		switch len(matches) {
-		case 0:
-			configVal = ns.Path
-		case 1:
-			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-		case 2:
-			configVal = matches[1]
-		default:
-			return fmt.Errorf("error parsing namespace path. expected /proc/(\\d+)/ns/*, got '%s'", ns.Path)
-		}
-
-		if err := clxc.SetConfigItem(configKey, configVal); err != nil {
+		if err := clxc.SetConfigItem(configKey, ns.Path); err != nil {
 			return err
 		}
 	}
