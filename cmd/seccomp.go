@@ -27,12 +27,6 @@ func configureSeccomp(spec *specs.Spec) error {
 		return nil
 	}
 
-	if spec.Process.NoNewPrivileges {
-		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
-			return err
-		}
-	}
-
 	profilePath := clxc.RuntimePath("seccomp.conf")
 	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
 		return err
@@ -41,7 +35,7 @@ func configureSeccomp(spec *specs.Spec) error {
 	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
 }
 
-// Note seccomp flags (see `man 2 seccomp`) are currently not supported 
+// Note seccomp flags (see `man 2 seccomp`) are currently not supported
 // https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config-linux.md#seccomp
 func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error {
 	profile, err := os.OpenFile(profilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0440)

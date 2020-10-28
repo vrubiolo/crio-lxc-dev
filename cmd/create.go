@@ -143,6 +143,12 @@ func configureContainer(spec *specs.Spec) error {
 		}
 	}
 
+	if spec.Process.NoNewPrivileges {
+		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+			return err
+		}
+	}
+
 	if clxc.Apparmor {
 		if err := configureApparmor(spec); err != nil {
 			return errors.Wrap(err, "failed to configure apparmor")
