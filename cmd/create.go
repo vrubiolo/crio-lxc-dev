@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -122,17 +123,6 @@ func configureContainer(spec *specs.Spec) error {
 		return err
 	}
 
-	// If a Hostname is defined a new UTS namespace must be created.
-	if spec.Hostname != "" {
-		if !isNamespaceEnabled(spec, specs.UTSNamespace) {
-			spec.Linux.Namespaces = append(spec.Linux.Namespaces, specs.LinuxNamespace{Type: specs.UTSNamespace})
-		}
-
-		if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
-			return err
-		}
-	}
-
 	if err := configureNamespaces(spec.Linux.Namespaces); err != nil {
 		return errors.Wrap(err, "failed to configure namespaces")
 	}
@@ -173,7 +163,7 @@ func configureContainer(spec *specs.Spec) error {
 		log.Warn().Msg("capabilities are disabled")
 	}
 
-  // TODO extract all uid/gid related settings into separate function configureUserAndGroups
+	// TODO extract all uid/gid related settings into separate function configureUserAndGroups
 	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
 		return err
 	}
@@ -202,8 +192,12 @@ func configureContainer(spec *specs.Spec) error {
 		}
 	}
 
+	if err := setHostname(spec); err != nil {
+		return errors.Wrap(err, "set hostname")
+	}
+
 	if err := ensureDefaultDevices(spec); err != nil {
-		return errors.Wrapf(err, "failed to add default devices")
+		return errors.Wrap(err, "failed to add default devices")
 	}
 
 	if err := configureCgroup(spec); err != nil {
@@ -517,6 +511,45 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 	err = unix.Sendmsg(int(sockFile.Fd()), []byte("terminal"), oob, nil, 0)
 	if err != nil {
 		return errors.Wrap(err, "failed to send console fd")
+	}
+	return nil
+}
+
+func setHostname(spec *specs.Spec) error {
+	if spec.Hostname == "" {
+		return nil
+	}
+
+	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
+		return err
+	}
+
+	// lxc does not set the hostname on shared namespaces
+	for _, ns := range spec.Linux.Namespaces {
+		if ns.Type != specs.UTSNamespace {
+			continue
+		}
+
+		// namespace is not shared
+		if ns.Path == "" {
+			return nil
+		}
+
+		f, err := os.Open(ns.Path)
+		if err != nil {
+			return errors.Wrapf(err, "failed to open uts namespace %s", ns.Path)
+		}
+		defer f.Close()
+
+		// setns only affects the current thread
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		err = unix.Setns(int(f.Fd()), unix.CLONE_NEWUTS)
+		if err != nil {
+			return err
+		}
+		return unix.Sethostname([]byte(spec.Hostname))
 	}
 	return nil
 }
