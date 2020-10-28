@@ -173,6 +173,7 @@ func configureContainer(spec *specs.Spec) error {
 		log.Warn().Msg("capabilities are disabled")
 	}
 
+	// TODO ensure that the user namespace is enabled
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
@@ -182,6 +183,13 @@ func configureContainer(spec *specs.Spec) error {
 
 	for _, m := range spec.Linux.GIDMappings {
 		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+			return err
+		}
+	}
+
+	// TODO set all groups
+	if len(spec.Process.User.AdditionalGids) > 0 && clxc.CanConfigure("lxc.init.groups") {
+		if err := clxc.SetConfigItem("lxc.init.groups", fmt.Sprintf("%d", spec.Process.User.AdditionalGids[0])); err != nil {
 			return err
 		}
 	}

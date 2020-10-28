@@ -29,17 +29,6 @@ func main() {
 		fail(err, "write to sync fifo")
 	}
 
-	if clxc.HasCapability(spec, "CAP_SETGID") && len(spec.Process.User.AdditionalGids) > 0 {
-		gids := make([]int, len(spec.Process.User.AdditionalGids))
-		for _, gid := range spec.Process.User.AdditionalGids {
-			gids = append(gids, int(gid))
-		}
-		err := unix.Setgroups(gids)
-		if err != nil {
-			fail(err, "setgroups")
-		}
-	}
-
 	env := setHome(spec.Process.Env, spec.Process.User.Username, spec.Process.Cwd)
 
 	if err := unix.Chdir(spec.Process.Cwd); err != nil {
