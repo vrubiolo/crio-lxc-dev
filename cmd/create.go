@@ -213,6 +213,14 @@ func configureContainer(spec *specs.Spec) error {
 			return err
 		}
 	}
+
+	for _, limit := range spec.Process.Rlimits {
+		name := strings.TrimPrefix(strings.ToLower(limit.Type), "rlimit_")
+		val := fmt.Sprintf("%d:%d", limit.Soft, limit.Hard)
+		if err := clxc.SetConfigItem("lxc.prlimit."+name, val); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
