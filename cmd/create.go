@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -185,9 +186,12 @@ func configureContainer(spec *specs.Spec) error {
 		}
 	}
 
-	// TODO set all groups
 	if len(spec.Process.User.AdditionalGids) > 0 && clxc.CanConfigure("lxc.init.groups") {
-		if err := clxc.SetConfigItem("lxc.init.groups", fmt.Sprintf("%d", spec.Process.User.AdditionalGids[0])); err != nil {
+		a := make([]string, len(spec.Process.User.AdditionalGids))
+		for _, gid := range spec.Process.User.AdditionalGids {
+			a = append(a, strconv.FormatUint(uint64(gid), 10))
+		}
+		if err := clxc.SetConfigItem("lxc.init.groups", strings.Join(a, " ")); err != nil {
 			return err
 		}
 	}
