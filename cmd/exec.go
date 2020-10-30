@@ -68,6 +68,14 @@ func doExec(ctx *cli.Context) error {
 		procArgs = procSpec.Args
 		attachOpts.UID = int(procSpec.User.UID)
 		attachOpts.GID = int(procSpec.User.GID)
+		if n := len(procSpec.User.AdditionalGids); n > 0 {
+			attachOpts.Groups = make([]int, n)
+			for i, g := range procSpec.User.AdditionalGids {
+				attachOpts.Groups[i] = int(g)
+			}
+		}
+		log.Debug().Int("uid:", attachOpts.UID).Int("gid:", attachOpts.GID).Ints("groups", attachOpts.Groups).Msg("process user")
+		log.Debug().Strs("arg:", procArgs).Msg("process args")
 		attachOpts.Cwd = procSpec.Cwd
 		// Use the environment defined by the process spec.
 		attachOpts.ClearEnv = true
