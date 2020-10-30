@@ -187,6 +187,7 @@ func (c *CrioLXC) configureLogging() error {
 func (c CrioLXC) CanConfigure(keys ...string) bool {
 	for _, key := range keys {
 		if !lxc.IsSupportedConfigItem(key) {
+			log.Info().Str("key:", key).Msg("unsupported lxc config item")
 			return false
 		}
 	}
