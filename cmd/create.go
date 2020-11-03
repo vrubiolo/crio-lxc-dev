@@ -187,7 +187,7 @@ func configureContainer(spec *specs.Spec) error {
 	}
 
 	if len(spec.Process.User.AdditionalGids) > 0 && clxc.CanConfigure("lxc.init.groups") {
-		a := make([]string, len(spec.Process.User.AdditionalGids))
+		a := make([]string, 0, len(spec.Process.User.AdditionalGids))
 		for _, gid := range spec.Process.User.AdditionalGids {
 			a = append(a, strconv.FormatUint(uint64(gid), 10))
 		}
