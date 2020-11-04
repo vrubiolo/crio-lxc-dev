@@ -28,21 +28,21 @@ func doState(ctx *cli.Context) error {
 		return errors.Wrapf(err, "failed to load container")
 	}
 
-	// bundlePath is the enclosing directory of the rootfs:
-	// https://github.com/opencontainers/runtime-spec/blob/v1.0.0-rc4/bundle.md
-	bundlePath := filepath.Dir(clxc.GetConfigItem("lxc.rootfs.path"))
+	// TODO save BundlePath to init spec
+	bundlePath := filepath.Join("/var/run/containers/storage/overlay-containers/", clxc.Name(), "userdata")
 
 	s := specs.State{
-		Version:     CURRENT_OCI_VERSION,
-		ID:          clxc.Name(),
-		Bundle:      bundlePath,
-		Annotations: map[string]string{},
+		Version: CURRENT_OCI_VERSION,
+		ID:      clxc.Name(),
+		Bundle:  bundlePath,
 	}
 
 	s.Pid, s.Status, err = clxc.getContainerState()
+	log.Debug().Int("pid:", s.Pid).Str("state:", s.Status).Msg("container state")
 
 	if stateJson, err := json.Marshal(s); err == nil {
 		fmt.Fprint(os.Stdout, string(stateJson))
+		log.Trace().RawJSON("state:", stateJson).Msg("container state")
 	} else {
 		return errors.Wrap(err, "failed to marshal json")
 	}

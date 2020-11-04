@@ -9,7 +9,9 @@ import (
 )
 
 const (
-	CURRENT_OCI_VERSION = "0.2.1"
+	// IMPORTANT should be synced with the runtime-spec dependency in go.mod
+	// github.com/opencontainers/runtime-spec v1.0.2
+	CURRENT_OCI_VERSION = "1.0.2"
 	// Environment variables are populated by default from this environment file.
 	// Existing environment variables are preserved.
 	EnvFileDefault = "/etc/default/crio-lxc"
