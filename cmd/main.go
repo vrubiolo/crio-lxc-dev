@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"os"
-	"path/filepath"
-	"runtime/pprof"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -143,12 +141,6 @@ func main() {
 			EnvVars:     []string{"CRIO_LXC_CGROUP_DEVICES"},
 			Value:       true,
 		},
-		&cli.BoolFlag{
-			Name:    "cpu-profile",
-			Usage:   "Write a CPU profile to the backup dir.",
-			EnvVars: []string{"CRIO_LXC_CPU_PROFILE"},
-			Value:   false,
-		},
 	}
 
 	startTime := time.Now()
@@ -157,8 +149,6 @@ func main() {
 		clxc.Command = ctx.Args().Get(0)
 		return nil
 	}
-
-	var cpuProfile *os.File
 
 	setupCmd := func(ctx *cli.Context) error {
 		containerID := ctx.Args().Get(0)
@@ -170,23 +160,6 @@ func main() {
 
 		if err := clxc.configureLogging(); err != nil {
 			return err
-		}
-
-		if err := os.MkdirAll(clxc.BackupDir, 0750); err != nil {
-			return errors.Wrapf(err, "failed to create backup directory")
-		}
-
-		if ctx.Bool("cpu-profile") {
-			profilePath := filepath.Join(clxc.BackupDir, clxc.ContainerID+".cpu")
-			f, err := os.Create(profilePath)
-			if err != nil {
-				return errors.Wrapf(err, "failed to create CPU profile %s", profilePath)
-			}
-			cpuProfile = f
-			log.Info().Str("path:", profilePath).Msg("profile runtime CPU usage")
-			if err := pprof.StartCPUProfile(f); err != nil {
-				return errors.Wrapf(err, "failed to start CPU profile")
-			}
 		}
 
 		for _, env := range os.Environ() {
@@ -242,10 +215,4 @@ func main() {
 		println(err.Error())
 		os.Exit(1)
 	}
-
-	if cpuProfile != nil {
-		pprof.StopCPUProfile()
-		cpuProfile.Close()
-	}
-
 }
