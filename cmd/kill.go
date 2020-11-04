@@ -93,6 +93,8 @@ func doKill(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to load container")
 	}
 
+	// Attempting to send a signal to a container that is neither created nor running
+	// MUST have no effect on the container and MUST generate an error.
 	if !clxc.Container.Running() {
 		return fmt.Errorf("container is not running")
 	}
@@ -101,9 +103,12 @@ func doKill(ctx *cli.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "invalid signal param")
 	}
-
-	if err := clxc.SetConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
-		return err
+	pid, proc := clxc.safeGetInitPid()
+	if proc != nil {
+		defer proc.Close()
 	}
-	return clxc.Container.Stop()
+	if pid <= 0 {
+		return errors.New("init process is not running")
+	}
+	return unix.Kill(pid, signum)
 }

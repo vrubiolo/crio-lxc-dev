@@ -263,9 +263,9 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 func (clxc *CrioLXC) getContainerState() (int, string, error) {
 	switch state := clxc.State(); state {
 	case lxc.STARTING:
-		return -1, stateCreating, nil
+		return 0, stateCreating, nil
 	case lxc.STOPPED:
-		return -1, stateStopped, nil
+		return 0, stateStopped, nil
 	default:
 		return clxc.getContainerInitState()
 	}
@@ -277,21 +277,19 @@ func (clxc *CrioLXC) getContainerState() (int, string, error) {
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
 func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
-	pid, proc, err := clxc.safeGetInitPid()
-	if err != nil {
-		// Errors returned from safeGetInitPid are non-fatal and indicate either
-		// that the init process has died. // TODO log error in debug or trace mode
-		return -1, stateStopped, nil
-	}
+	pid, proc := clxc.safeGetInitPid()
 	if proc != nil {
 		defer proc.Close()
+	}
+	if pid <= 0 {
+		return 0, stateStopped, nil
 	}
 
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
-		// This is fatal. It should not happen because we a filehandle to /proc/%d is open.
-		return -1, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
+		// This is fatal. It should not happen because a filehandle to /proc/%d is open.
+		return 0, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
 	}
 
 	environ := strings.Split(string(data), "\000")
@@ -303,28 +301,36 @@ func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
 	return pid, stateRunning, nil
 }
 
-// This is not required when lxc uses pidfd internally
-func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File, err error) {
+func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File) {
 	pid = c.InitPid()
-	if pid < 0 {
-		return -1, nil, fmt.Errorf("expected init pid > 0, but was %d", pid)
+	if pid <= 0 {
+		// Errors returned from safeGetInitPid indicate that the init process has died.
+		return 0, nil
 	}
 	// Open the proc directory of the init process to avoid that
 	// it's PID is recycled before it receives the signal.
-	proc, err = os.Open(fmt.Sprintf("/proc/%d", pid))
-	if err != nil {
-		// This may fail if either the proc filesystem is not mounted, or
-		// the process has died
-		fmt.Fprintf(os.Stderr, "failed to open /proc/%d : %s", pid, err)
-	}
+	proc, err := os.Open(fmt.Sprintf("/proc/%d", pid))
+
 	// double check that the init process still exists, and the proc
 	// directory actually belongs to the init process.
 	pid2 := c.InitPid()
 	if pid2 != pid {
-		proc.Close()
-		return -1, nil, errors.Wrapf(err, "init process %d has already died", pid)
+		if proc != nil {
+			proc.Close()
+		}
+		// init process has died which should only happen if /proc/%d was not opened
+		return 0, nil
 	}
-	return pid, proc, nil
+
+	// The init PID still exists, but /proc/{pid} can not be opened.
+	// The only reason maybe that the proc filesystem is not mounted.
+	// It's unlikely a permissions problem because crio runs as privileged process.
+	// This leads to race conditions and should appear in the logs.
+	if proc == nil {
+		log.Error().Err(err).Int("pid:", pid).Msg("failed to open /proc directory for init PID - procfs mounted?")
+	}
+
+	return pid, proc
 }
 
 func (clxc *CrioLXC) waitContainerCreated(timeout time.Duration) error {
