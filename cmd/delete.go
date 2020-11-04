@@ -57,38 +57,35 @@ func doDelete(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to delete container")
 	}
 
-	// left-over directories .lxc lxc.pivot
-	if err := tryRemoveAllCgroupDir(c, "lxc.cgroup.dir"); err != nil {
-		log.Warn().Err(err).Msg("remove lxc.cgroup.dir failed")
-	}
-	if err := tryRemoveAllCgroupDir(c, "lxc.cgroup.dir.container"); err != nil {
-		log.Warn().Err(err).Msg("remove lxc.cgroup.dir.container failed")
-	}
-	//tryRemoveAllCgroupDir(c, "lxc.cgroup.dir.monitor")
-	/*
-		spec, err := clxc.ReadSpec(clxc.RuntimePath(clxc.INIT_SPEC))
-		if err != nil {
-		  return errors.Wrap(err, "failed to load runtime spec")
-			panic(err)
+	if dir := clxc.GetConfigItem("lxc.cgroup.dir"); dir != "" {
+		if err := tryRemoveAllCgroupDir(c, dir, true); err != nil {
+			log.Warn().Err(err).Msg("remove lxc.cgroup.dir failed")
+		} else {
+			// try to remove outer directory, in case this is the POD that is deleted
+			// FIXME crio should delete the kubepods slice
+			tryRemoveAllCgroupDir(c, filepath.Dir(dir), false)
 		}
-	*/
+	}
+
+	if dir := clxc.GetConfigItem("lxc.cgroup.dir.container"); dir != "" {
+		if err := tryRemoveAllCgroupDir(c, dir, true); err != nil {
+			log.Warn().Err(err).Msg("remove lxc.cgroup.dir.container failed")
+		} else {
+			// try to remove outer directory, in case this is the POD that is deleted
+			// FIXME crio should delete the kubepods slice
+			tryRemoveAllCgroupDir(c, filepath.Dir(dir), false)
+		}
+	}
 
 	// "Note that resources associated with the container,
 	// but not created by this container, MUST NOT be deleted."
-
 	// TODO - because we set rootfs.managed=0, Destroy() doesn't
 	// delete the /var/lib/lxc/$containerID/config file:
 	return os.RemoveAll(clxc.RuntimePath())
 }
 
-func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
-	val := clxc.GetConfigItem(cfgName)
-	if val == "" {
-		return nil
-	}
-
-	dirName := filepath.Join("/sys/fs/cgroup", val)
-	log.Warn().Str("dirnName:", dirName).Msg("MARK")
+func tryRemoveAllCgroupDir(c *lxc.Container, cgroupPath string, killProcs bool) error {
+	dirName := filepath.Join("/sys/fs/cgroup", cgroupPath)
 	dir, err := os.Open(dirName)
 	if os.IsNotExist(err) {
 		return nil
@@ -96,7 +93,9 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 	if err != nil {
 		return err
 	}
-	loopKillCgroupProcs(dirName, time.Second*2)
+	if killProcs {
+		loopKillCgroupProcs(dirName, time.Second*2)
+	}
 	entries, err := dir.Readdir(-1)
 	if err != nil {
 		return err
@@ -105,7 +104,6 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cfgName string) error {
 	for _, i := range entries {
 		if i.IsDir() && i.Name() != "." && i.Name() != ".." {
 			fullPath := filepath.Join(dirName, i.Name())
-			log.Warn().Str("cgroup:", fullPath).Msg("MARK")
 			if err := unix.Rmdir(fullPath); err != nil {
 				return errors.Wrapf(err, "failed rmdir %s", fullPath)
 			}
