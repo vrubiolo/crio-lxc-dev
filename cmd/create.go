@@ -255,7 +255,7 @@ func configureInit(spec *specs.Spec) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", internal.ConfigDir)
 	}
-	err = os.MkdirAll(clxc.runtimePath(internal.ConfigDir), 0700)
+	err = os.MkdirAll(clxc.runtimePath(internal.ConfigDir), 0755)
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in lxc container dir", internal.ConfigDir)
 	}
