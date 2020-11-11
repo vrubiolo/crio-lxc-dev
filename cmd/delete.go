@@ -33,8 +33,8 @@ var deleteCmd = cli.Command{
 }
 
 func doDelete(ctx *cli.Context) error {
-	err := clxc.LoadContainer()
-	if err == ErrContainerNotExist && ctx.Bool("force") {
+	err := clxc.loadContainer()
+	if err == errContainerNotExist && ctx.Bool("force") {
 		return nil
 	}
 	if err != nil {
@@ -57,7 +57,7 @@ func doDelete(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to delete container")
 	}
 
-	if dir := clxc.GetConfigItem("lxc.cgroup.dir"); dir != "" {
+	if dir := clxc.getConfigItem("lxc.cgroup.dir"); dir != "" {
 		if err := tryRemoveAllCgroupDir(c, dir, true); err != nil {
 			log.Warn().Err(err).Msg("remove lxc.cgroup.dir failed")
 		} else {
@@ -67,7 +67,7 @@ func doDelete(ctx *cli.Context) error {
 		}
 	}
 
-	if dir := clxc.GetConfigItem("lxc.cgroup.dir.container"); dir != "" {
+	if dir := clxc.getConfigItem("lxc.cgroup.dir.container"); dir != "" {
 		if err := tryRemoveAllCgroupDir(c, dir, true); err != nil {
 			log.Warn().Err(err).Msg("remove lxc.cgroup.dir.container failed")
 		} else {
@@ -81,7 +81,7 @@ func doDelete(ctx *cli.Context) error {
 	// but not created by this container, MUST NOT be deleted."
 	// TODO - because we set rootfs.managed=0, Destroy() doesn't
 	// delete the /var/lib/lxc/$containerID/config file:
-	return os.RemoveAll(clxc.RuntimePath())
+	return os.RemoveAll(clxc.runtimePath())
 }
 
 func tryRemoveAllCgroupDir(c *lxc.Container, cgroupPath string, killProcs bool) error {
@@ -94,7 +94,10 @@ func tryRemoveAllCgroupDir(c *lxc.Container, cgroupPath string, killProcs bool) 
 		return err
 	}
 	if killProcs {
-		loopKillCgroupProcs(dirName, time.Second*2)
+		err := loopKillCgroupProcs(dirName, time.Second*2)
+		if err != nil {
+			log.Trace().Err(err).Str("dir:", dirName).Msg("failed to kill cgroup procs")
+		}
 	}
 	entries, err := dir.Readdir(-1)
 	if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -27,12 +28,12 @@ func configureSeccomp(spec *specs.Spec) error {
 		return nil
 	}
 
-	profilePath := clxc.RuntimePath("seccomp.conf")
+	profilePath := clxc.runtimePath("seccomp.conf")
 	if err := writeSeccompProfile(profilePath, spec.Linux.Seccomp); err != nil {
 		return err
 	}
 
-	return clxc.SetConfigItem("lxc.seccomp.profile", profilePath)
+	return clxc.setConfigItem("lxc.seccomp.profile", profilePath)
 }
 
 // Note seccomp flags (see `man 2 seccomp`) are currently not supported
@@ -45,9 +46,9 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 	defer profile.Close()
 
 	w := bufio.NewWriter(profile)
-	defer w.Flush()
 
 	w.WriteString("2\n")
+
 	action, err := defaultAction(seccomp)
 	if err != nil {
 		return err
@@ -67,7 +68,11 @@ func writeSeccompProfile(profilePath string, seccomp *specs.LinuxSeccomp) error 
 			}
 		}
 	}
-	return nil
+	// ensure profile is written to disk without errors
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	return profile.Sync()
 }
 
 func defaultAction(seccomp *specs.LinuxSeccomp) (string, error) {
@@ -108,6 +113,11 @@ func seccompArchs(seccomp *specs.LinuxSeccomp) ([]string, error) {
 		archs = append(archs, s)
 	}
 	return archs, nil
+}
+
+func nullTerminatedString(data []byte) string {
+	i := bytes.Index(data, []byte{0})
+	return string(data[:i])
 }
 
 func writeSeccompSyscall(w *bufio.Writer, sc specs.LinuxSyscall) error {
