@@ -6,6 +6,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.20.0
 	github.com/stretchr/testify v1.3.0
+	github.com/urfave/cli v1.22.5 // indirect
 	github.com/urfave/cli/v2 v2.2.0
 	golang.org/x/sys v0.0.0-20200831180312-196b9ba8737a
 	gopkg.in/lxc/go-lxc.v2 v2.0.0-20200826211823-2dd0dc9c018b

@@ -3,11 +3,15 @@ package main
 import (
 	"fmt"
 	"github.com/pkg/errors"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/lxc/crio-lxc/cmd/internal"
 	"github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
 )
@@ -32,6 +36,30 @@ type CrioLXC struct {
 	LogFilePath    string
 	LogLevel       lxc.LogLevel
 	LogLevelString string
+	BackupDir      string
+	Backup         bool
+	BackupOnError  bool
+	SystemdCgroup  bool
+	MonitorCgroup  string
+	StartCommand   string
+	InitCommand    string
+	HookCommand    string
+
+	// feature gates
+	Seccomp       bool
+	Capabilities  bool
+	Apparmor      bool
+	CgroupDevices bool
+
+	// create flags
+	BundlePath    string
+	SpecPath      string // BundlePath + "/config.json"
+	PidFile       string
+	ConsoleSocket string
+	CreateTimeout time.Duration
+
+	// start flags
+	StartTimeout time.Duration
 }
 
 func (c CrioLXC) VersionString() string {
@@ -184,4 +212,147 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 	default:
 		return lxc.ERROR, fmt.Errorf("Invalid log-level %s", s)
 	}
+}
+
+// BackupRuntimeResources creates a backup of the container runtime resources.
+// It returns the path to the backup directory.
+//
+// The following resources are backed up:
+// - all resources created by crio-lxc (lxc config, init script, device creation script ...)
+// - lxc logfiles (if logging is setup per container)
+// - the runtime spec
+func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
+	backupDir = filepath.Join(c.BackupDir, c.ContainerID)
+	err = os.MkdirAll(c.BackupDir, 0755)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create backup dir")
+	}
+	err = runCommand("cp", "-r", "-p", clxc.RuntimePath(), backupDir)
+	if err != nil {
+		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
+	}
+	// remove syncfifo because it is not of any use and blocks 'grep' within the backup directory.
+	os.Remove(filepath.Join(backupDir, internal.SYNC_FIFO_PATH))
+	err = runCommand("cp", clxc.SpecPath, backupDir)
+	if err != nil {
+		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")
+	}
+	return backupDir, nil
+}
+
+// TODO avoid shellout
+func runCommand(args ...string) error {
+	cmd := exec.Command(args[0], args[1:]...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return errors.Errorf("%s: %s: %s", strings.Join(args, " "), err, string(output))
+	}
+	return nil
+}
+
+// runtime states https://github.com/opencontainers/runtime-spec/blob/v1.0.2/runtime.md
+const (
+	// the container is being created (step 2 in the lifecycle)
+	stateCreating = "creating"
+	// the runtime has finished the create operation (after step 2 in the lifecycle),
+	// and the container process has neither exited nor executed the user-specified program
+	stateCreated = "created"
+	// the container process has executed the user-specified program
+	// but has not exited (after step 5 in the lifecycle)
+	stateRunning = "running"
+	// the container process has exited (step 7 in the lifecycle)
+	stateStopped = "stopped"
+
+	// crio-lxc-init is started but blocking at the syncfifo
+	envStateCreated = "CRIO_LXC_STATE=" + stateCreated
+)
+
+func (clxc *CrioLXC) getContainerState() (int, string, error) {
+	switch state := clxc.State(); state {
+	case lxc.STARTING:
+		return 0, stateCreating, nil
+	case lxc.STOPPED:
+		return 0, stateStopped, nil
+	default:
+		return clxc.getContainerInitState()
+	}
+}
+
+// getContainerInitState returns the runtime state of the container.
+// It is used to determine whether the container state is 'created' or 'running'.
+// The init process environment contains #envStateCreated if the the container
+// is created, but not yet running/started.
+// This requires the proc filesystem to be mounted on the host.
+func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
+	pid, proc := clxc.safeGetInitPid()
+	if proc != nil {
+		defer proc.Close()
+	}
+	if pid <= 0 {
+		return 0, stateStopped, nil
+	}
+
+	envFile := fmt.Sprintf("/proc/%d/environ", pid)
+	data, err := ioutil.ReadFile(envFile)
+	if err != nil {
+		// This is fatal. It should not happen because a filehandle to /proc/%d is open.
+		return 0, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
+	}
+
+	environ := strings.Split(string(data), "\000")
+	for _, env := range environ {
+		if env == envStateCreated {
+			return pid, stateCreated, nil
+		}
+	}
+	return pid, stateRunning, nil
+}
+
+func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File) {
+	pid = c.InitPid()
+	if pid <= 0 {
+		// Errors returned from safeGetInitPid indicate that the init process has died.
+		return 0, nil
+	}
+	// Open the proc directory of the init process to avoid that
+	// it's PID is recycled before it receives the signal.
+	proc, err := os.Open(fmt.Sprintf("/proc/%d", pid))
+
+	// double check that the init process still exists, and the proc
+	// directory actually belongs to the init process.
+	pid2 := c.InitPid()
+	if pid2 != pid {
+		if proc != nil {
+			proc.Close()
+		}
+		// init process has died which should only happen if /proc/%d was not opened
+		return 0, nil
+	}
+
+	// The init PID still exists, but /proc/{pid} can not be opened.
+	// The only reason maybe that the proc filesystem is not mounted.
+	// It's unlikely a permissions problem because crio runs as privileged process.
+	// This leads to race conditions and should appear in the logs.
+	if proc == nil {
+		log.Error().Err(err).Int("pid:", pid).Msg("failed to open /proc directory for init PID - procfs mounted?")
+	}
+
+	return pid, proc
+}
+
+func (clxc *CrioLXC) waitContainerCreated(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		log.Trace().Msg("poll for container init state")
+		pid, state, err := clxc.getContainerInitState()
+		if err != nil {
+			return errors.Wrap(err, "failed to wait for container container creation")
+		}
+
+		if pid > 0 && state == stateCreated {
+			return nil
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+	return fmt.Errorf("timeout (%s) waiting for container creation", timeout)
 }
