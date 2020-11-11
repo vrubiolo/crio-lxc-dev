@@ -57,7 +57,7 @@ var createCmd = cli.Command{
 func doCreate(ctx *cli.Context) error {
 	err := doCreateInternal()
 	if clxc.Backup || (err != nil && clxc.BackupOnError) {
-		backupDir, backupErr := clxc.BackupRuntimeResources()
+		backupDir, backupErr := clxc.backupRuntimeResources()
 		if backupErr == nil {
 			log.Warn().Str("dir:", backupDir).Msg("runtime backup completed")
 		} else {
@@ -73,17 +73,17 @@ func doCreateInternal() error {
 		return fmt.Errorf("LXC runtime version > 3.1.0 required, but was %s", lxc.Version())
 	}
 
-	err := clxc.LoadContainer()
+	err := clxc.loadContainer()
 	if err == nil {
 		return fmt.Errorf("container already exists")
 	}
 
-	err = clxc.CreateContainer()
+	err = clxc.createContainer()
 	if err != nil {
 		return errors.Wrap(err, "failed to create container")
 	}
 
-	if err := clxc.SetConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
+	if err := clxc.setConfigItem("lxc.log.file", clxc.LogFilePath); err != nil {
 		return err
 	}
 
@@ -129,13 +129,13 @@ func configureContainer(spec *specs.Spec) error {
 	}
 
 	if spec.Process.OOMScoreAdj != nil {
-		if err := clxc.SetConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
+		if err := clxc.setConfigItem("lxc.proc.oom_score_adj", fmt.Sprintf("%d", *spec.Process.OOMScoreAdj)); err != nil {
 			return err
 		}
 	}
 
 	if spec.Process.NoNewPrivileges {
-		if err := clxc.SetConfigItem("lxc.no_new_privs", "1"); err != nil {
+		if err := clxc.setConfigItem("lxc.no_new_privs", "1"); err != nil {
 			return err
 		}
 	}
@@ -165,33 +165,33 @@ func configureContainer(spec *specs.Spec) error {
 	}
 
 	// TODO extract all uid/gid related settings into separate function configureUserAndGroups
-	if err := clxc.SetConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
+	if err := clxc.setConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
 		return err
 	}
-	if err := clxc.SetConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
+	if err := clxc.setConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
 		return err
 	}
 
 	// TODO ensure that the user namespace is enabled
 	// See `man lxc.container.conf` lxc.idmap.
 	for _, m := range spec.Linux.UIDMappings {
-		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+		if err := clxc.setConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
 			return err
 		}
 	}
 
 	for _, m := range spec.Linux.GIDMappings {
-		if err := clxc.SetConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
+		if err := clxc.setConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
 			return err
 		}
 	}
 
-	if len(spec.Process.User.AdditionalGids) > 0 && clxc.CanConfigure("lxc.init.groups") {
+	if len(spec.Process.User.AdditionalGids) > 0 && supportsConfigItem("lxc.init.groups") {
 		a := make([]string, 0, len(spec.Process.User.AdditionalGids))
 		for _, gid := range spec.Process.User.AdditionalGids {
 			a = append(a, strconv.FormatUint(uint64(gid), 10))
 		}
-		if err := clxc.SetConfigItem("lxc.init.groups", strings.Join(a, " ")); err != nil {
+		if err := clxc.setConfigItem("lxc.init.groups", strings.Join(a, " ")); err != nil {
 			return err
 		}
 	}
@@ -209,7 +209,7 @@ func configureContainer(spec *specs.Spec) error {
 	}
 
 	for key, val := range spec.Linux.Sysctl {
-		if err := clxc.SetConfigItem("lxc.sysctl."+key, val); err != nil {
+		if err := clxc.setConfigItem("lxc.sysctl."+key, val); err != nil {
 			return err
 		}
 	}
@@ -217,7 +217,7 @@ func configureContainer(spec *specs.Spec) error {
 	for _, limit := range spec.Process.Rlimits {
 		name := strings.TrimPrefix(strings.ToLower(limit.Type), "rlimit_")
 		val := fmt.Sprintf("%d:%d", limit.Soft, limit.Hard)
-		if err := clxc.SetConfigItem("lxc.prlimit."+name, val); err != nil {
+		if err := clxc.setConfigItem("lxc.prlimit."+name, val); err != nil {
 			return err
 		}
 	}
@@ -225,15 +225,15 @@ func configureContainer(spec *specs.Spec) error {
 }
 
 func configureRootfs(spec *specs.Spec) error {
-	if err := clxc.SetConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
+	if err := clxc.setConfigItem("lxc.rootfs.path", spec.Root.Path); err != nil {
 		return err
 	}
-	if err := clxc.SetConfigItem("lxc.rootfs.managed", "0"); err != nil {
+	if err := clxc.setConfigItem("lxc.rootfs.managed", "0"); err != nil {
 		return err
 	}
 
 	// Resources not created by the container runtime MUST NOT be deleted by it.
-	if err := clxc.SetConfigItem("lxc.ephemeral", "0"); err != nil {
+	if err := clxc.setConfigItem("lxc.ephemeral", "0"); err != nil {
 		return err
 	}
 
@@ -244,39 +244,39 @@ func configureRootfs(spec *specs.Spec) error {
 	if spec.Root.Readonly {
 		rootfsOptions = append(rootfsOptions, "ro")
 	}
-	if err := clxc.SetConfigItem("lxc.rootfs.options", strings.Join(rootfsOptions, ",")); err != nil {
+	if err := clxc.setConfigItem("lxc.rootfs.options", strings.Join(rootfsOptions, ",")); err != nil {
 		return err
 	}
 	return nil
 }
 
 func configureInit(spec *specs.Spec) error {
-	err := os.MkdirAll(filepath.Join(spec.Root.Path, internal.CFG_DIR), 0755)
+	err := os.MkdirAll(filepath.Join(spec.Root.Path, internal.ConfigDir), 0755)
 	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in rootfs", internal.CFG_DIR)
+		return errors.Wrapf(err, "Failed creating %s in rootfs", internal.ConfigDir)
 	}
-	err = os.MkdirAll(clxc.RuntimePath(internal.CFG_DIR), 0755)
+	err = os.MkdirAll(clxc.runtimePath(internal.ConfigDir), 0755)
 	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in lxc container dir", internal.CFG_DIR)
+		return errors.Wrapf(err, "Failed creating %s in lxc container dir", internal.ConfigDir)
 	}
 
 	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(clxc.RuntimePath(internal.SYNC_FIFO_PATH)); err != nil {
+	if err := makeSyncFifo(clxc.runtimePath(internal.SyncFifoPath)); err != nil {
 		return errors.Wrapf(err, "failed to make sync fifo")
 	}
 
 	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.RuntimePath(internal.CFG_DIR),
-		Destination: strings.Trim(internal.CFG_DIR, "/"),
+		Source:      clxc.runtimePath(internal.ConfigDir),
+		Destination: strings.Trim(internal.ConfigDir, "/"),
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
 
 	// pass context information as environment variables to hook scripts
-	if err := clxc.SetConfigItem("lxc.hook.version", "1"); err != nil {
+	if err := clxc.setConfigItem("lxc.hook.version", "1"); err != nil {
 		return err
 	}
-	if err := clxc.SetConfigItem("lxc.hook.mount", clxc.HookCommand); err != nil {
+	if err := clxc.setConfigItem("lxc.hook.mount", clxc.HookCommand); err != nil {
 		return err
 	}
 
@@ -286,36 +286,44 @@ func configureInit(spec *specs.Spec) error {
 			path = kv
 		}
 	}
-	if err := clxc.SetConfigItem("lxc.environment", path); err != nil {
+	if err := clxc.setConfigItem("lxc.environment", path); err != nil {
 		return err
 	}
-	if err := clxc.SetConfigItem("lxc.environment", envStateCreated); err != nil {
+	if err := clxc.setConfigItem("lxc.environment", envStateCreated); err != nil {
 		return err
 	}
 
 	// create destination file for bind mount
-	initBin := clxc.RuntimePath(internal.INIT_CMD)
+	initBin := clxc.runtimePath(internal.InitCmd)
 	err = touchFile(initBin, 0750)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create %s", initBin)
 	}
 	spec.Mounts = append(spec.Mounts, specs.Mount{
 		Source:      clxc.InitCommand,
-		Destination: internal.INIT_CMD,
+		Destination: internal.InitCmd,
 		Type:        "bind",
 		Options:     []string{"bind", "ro"},
 	})
-	return clxc.SetConfigItem("lxc.init.cmd", internal.INIT_CMD)
+	return clxc.setConfigItem("lxc.init.cmd", internal.InitCmd)
+}
+
+func touchFile(filePath string, perm os.FileMode) error {
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDONLY, perm)
+	if err == nil {
+		return f.Close()
+	}
+	return err
 }
 
 func configureReadonlyPaths(spec *specs.Spec) error {
-	rootmnt := clxc.GetConfigItem("lxc.rootfs.mount")
+	rootmnt := clxc.getConfigItem("lxc.rootfs.mount")
 	if rootmnt == "" {
 		return errors.New("lxc.rootfs.mount unavailable")
 	}
 	for _, p := range spec.Linux.ReadonlyPaths {
 		mnt := fmt.Sprintf("%s %s %s %s", filepath.Join(rootmnt, p), strings.TrimPrefix(p, "/"), "bind", "bind,ro,optional")
-		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+		if err := clxc.setConfigItem("lxc.mount.entry", mnt); err != nil {
 			return errors.Wrap(err, "failed to make path readonly")
 		}
 	}
@@ -341,7 +349,7 @@ func configureApparmor(spec *specs.Spec) error {
 	if aaprofile == "" {
 		aaprofile = "unconfined"
 	}
-	return clxc.SetConfigItem("lxc.apparmor.profile", aaprofile)
+	return clxc.setConfigItem("lxc.apparmor.profile", aaprofile)
 }
 
 // configureCapabilities configures the linux capabilities / privileges granted to the container processes.
@@ -359,7 +367,7 @@ func configureCapabilities(spec *specs.Spec) error {
 		keepCaps = strings.Join(caps, " ")
 	}
 
-	return clxc.SetConfigItem("lxc.cap.keep", keepCaps)
+	return clxc.setConfigItem("lxc.cap.keep", keepCaps)
 }
 
 func isDeviceEnabled(spec *specs.Spec, dev specs.LinuxDevice) bool {
@@ -392,7 +400,7 @@ func addDevicePerms(spec *specs.Spec, devType string, major *int64, minor *int64
 // TODO file an issue on cri-o (at least for support)
 func ensureDefaultDevices(spec *specs.Spec) error {
 	// make sure autodev is disabled
-	if err := clxc.SetConfigItem("lxc.autodev", "0"); err != nil {
+	if err := clxc.setConfigItem("lxc.autodev", "0"); err != nil {
 		return err
 	}
 
@@ -428,7 +436,7 @@ func ensureDefaultDevices(spec *specs.Spec) error {
 }
 
 func startContainer(spec *specs.Spec, timeout time.Duration) error {
-	configFilePath := clxc.RuntimePath("config")
+	configFilePath := clxc.runtimePath("config")
 	cmd := exec.Command(clxc.StartCommand, clxc.Container.Name(), clxc.RuntimeRoot, configFilePath)
 	// Start container with a clean environment.
 	// LXC will export variables defined in the config lxc.environment.
@@ -446,7 +454,7 @@ func startContainer(spec *specs.Spec, timeout time.Duration) error {
 	if !spec.Process.Terminal {
 		// Inherit stdio from calling process (conmon).
 		// lxc.console.path must be set to 'none' or stdio of init process is replaced with a PTY by lxc
-		if err := clxc.SetConfigItem("lxc.console.path", "none"); err != nil {
+		if err := clxc.setConfigItem("lxc.console.path", "none"); err != nil {
 			return errors.Wrap(err, "failed to disable PTY")
 		}
 		cmd.Stdin = os.Stdin
@@ -458,7 +466,7 @@ func startContainer(spec *specs.Spec, timeout time.Duration) error {
 		return err
 	}
 
-	if err := internal.WriteSpec(spec, clxc.RuntimePath(internal.INIT_SPEC)); err != nil {
+	if err := internal.WriteSpec(spec, clxc.runtimePath(internal.InitSpec)); err != nil {
 		return errors.Wrapf(err, "failed to write init spec")
 	}
 
@@ -514,7 +522,6 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to start with pty")
 	}
-	defer ptmx.Close()
 
 	// Send the pty file descriptor over the console socket (to the 'conmon' process)
 	// For technical backgrounds see:
@@ -526,7 +533,7 @@ func startConsole(cmd *exec.Cmd, consoleSocket string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to send console fd")
 	}
-	return nil
+	return ptmx.Close()
 }
 
 func setHostname(spec *specs.Spec) error {
@@ -534,7 +541,7 @@ func setHostname(spec *specs.Spec) error {
 		return nil
 	}
 
-	if err := clxc.SetConfigItem("lxc.uts.name", spec.Hostname); err != nil {
+	if err := clxc.setConfigItem("lxc.uts.name", spec.Hostname); err != nil {
 		return err
 	}
 

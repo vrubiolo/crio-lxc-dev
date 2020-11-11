@@ -18,7 +18,7 @@ func configureCgroup(spec *specs.Spec) error {
 	}
 
 	// lxc.cgroup.root and lxc.cgroup.relative must not be set for cgroup v2
-	if err := clxc.SetConfigItem("lxc.cgroup.relative", "0"); err != nil {
+	if err := clxc.setConfigItem("lxc.cgroup.relative", "0"); err != nil {
 		return err
 	}
 
@@ -39,7 +39,7 @@ func configureCgroup(spec *specs.Spec) error {
 	}
 
 	if pids := spec.Linux.Resources.Pids; pids != nil {
-		if err := clxc.SetConfigItem("lxc.cgroup2.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
+		if err := clxc.setConfigItem("lxc.cgroup2.pids.max", fmt.Sprintf("%d", pids.Limit)); err != nil {
 			return err
 		}
 	}
@@ -62,25 +62,25 @@ func configureCgroupPath(linux *specs.Linux) error {
 		return fmt.Errorf("empty cgroups path in spec")
 	}
 	if !clxc.SystemdCgroup {
-		return clxc.SetConfigItem("lxc.cgroup.dir", linux.CgroupsPath)
+		return clxc.setConfigItem("lxc.cgroup.dir", linux.CgroupsPath)
 	}
 	cgPath := parseSystemdCgroupPath(linux.CgroupsPath)
 	// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
 	// checking for on of the config items shuld be enough, because they were introduced together ...
-	if clxc.CanConfigure("lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor") {
-		if err := clxc.SetConfigItem("lxc.cgroup.dir.container", cgPath.String()); err != nil {
+	if supportsConfigItem("lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor") {
+		if err := clxc.setConfigItem("lxc.cgroup.dir.container", cgPath.String()); err != nil {
 			return err
 		}
-		if err := clxc.SetConfigItem("lxc.cgroup.dir.monitor", filepath.Join(clxc.MonitorCgroup, clxc.Container.Name()+".scope")); err != nil {
+		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor", filepath.Join(clxc.MonitorCgroup, clxc.Container.Name()+".scope")); err != nil {
 			return err
 		}
 	} else {
-		if err := clxc.SetConfigItem("lxc.cgroup.dir", cgPath.String()); err != nil {
+		if err := clxc.setConfigItem("lxc.cgroup.dir", cgPath.String()); err != nil {
 			return err
 		}
 	}
-	if clxc.CanConfigure("lxc.cgroup.dir.monitor.pivot") {
-		if err := clxc.SetConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
+	if supportsConfigItem("lxc.cgroup.dir.monitor.pivot") {
+		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
 			return err
 		}
 	}
@@ -94,10 +94,10 @@ func configureDeviceController(spec *specs.Spec) error {
 	if !clxc.CgroupDevices {
 		log.Warn().Msg("cgroup device controller is disabled (access to all devices is granted)")
 		// allow read-write-mknod access to all char and block devices
-		if err := clxc.SetConfigItem(devicesAllow, "b *:* rwm"); err != nil {
+		if err := clxc.setConfigItem(devicesAllow, "b *:* rwm"); err != nil {
 			return err
 		}
-		if err := clxc.SetConfigItem(devicesAllow, "c *:* rwm"); err != nil {
+		if err := clxc.setConfigItem(devicesAllow, "c *:* rwm"); err != nil {
 			return err
 		}
 		return nil
@@ -137,16 +137,16 @@ func configureDeviceController(spec *specs.Spec) error {
 			}
 			// decompose
 			val := fmt.Sprintf("%s %s:%s %s", blockDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
+			if err := clxc.setConfigItem(key, val); err != nil {
 				return err
 			}
 			val = fmt.Sprintf("%s %s:%s %s", charDevice, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
+			if err := clxc.setConfigItem(key, val); err != nil {
 				return err
 			}
 		case blockDevice, charDevice:
 			val := fmt.Sprintf("%s %s:%s %s", dev.Type, maj, min, dev.Access)
-			if err := clxc.SetConfigItem(key, val); err != nil {
+			if err := clxc.setConfigItem(key, val); err != nil {
 				return err
 			}
 		default:
@@ -162,32 +162,32 @@ func configureCPUController(linux *specs.LinuxCPU) error {
 	log.Debug().Msg("TODO configure cgroup cpu controller")
 	/*
 		if cpu.Shares != nil && *cpu.Shares > 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
+				if err := clxc.setConfigItem("lxc.cgroup2.cpu.shares", fmt.Sprintf("%d", *cpu.Shares)); err != nil {
 					return err
 				}
 		}
 		if cpu.Quota != nil && *cpu.Quota > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
+			if err := clxc.setConfigItem("lxc.cgroup2.cpu.cfs_quota_us", fmt.Sprintf("%d", *cpu.Quota)); err != nil {
 				return err
 			}
 		}
 			if cpu.Period != nil && *cpu.Period != 0 {
-				if err := clxc.SetConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
+				if err := clxc.setConfigItem("lxc.cgroup2.cpu.cfs_period_us", fmt.Sprintf("%d", *cpu.Period)); err != nil {
 					return err
 				}
 			}
 		if cpu.Cpus != "" {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
+			if err := clxc.setConfigItem("lxc.cgroup2.cpuset.cpus", cpu.Cpus); err != nil {
 				return err
 			}
 		}
 		if cpu.RealtimePeriod != nil && *cpu.RealtimePeriod > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
+			if err := clxc.setConfigItem("lxc.cgroup2.cpu.rt_period_us", fmt.Sprintf("%d", *cpu.RealtimePeriod)); err != nil {
 				return err
 			}
 		}
 		if cpu.RealtimeRuntime != nil && *cpu.RealtimeRuntime > 0 {
-			if err := clxc.SetConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
+			if err := clxc.setConfigItem("lxc.cgroup2.cpu.rt_runtime_us", fmt.Sprintf("%d", *cpu.RealtimeRuntime)); err != nil {
 				return err
 			}
 		}

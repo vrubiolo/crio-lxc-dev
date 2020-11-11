@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +11,7 @@ func createPidFile(path string, pid int) error {
 	tmpDir := filepath.Dir(path)
 	tmpName := filepath.Join(tmpDir, fmt.Sprintf(".%s", filepath.Base(path)))
 
-	f, err := os.OpenFile(tmpName, os.O_RDWR|os.O_CREATE|os.O_EXCL|os.O_SYNC, 0640)
+	f, err := os.OpenFile(tmpName, os.O_RDWR|os.O_CREATE|os.O_EXCL|os.O_SYNC, 0600)
 	if err != nil {
 		return err
 	}
@@ -25,17 +24,4 @@ func createPidFile(path string, pid int) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
-}
-
-func touchFile(filePath string, perm os.FileMode) error {
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDONLY, perm)
-	if err == nil {
-		f.Close()
-	}
-	return err
-}
-
-func nullTerminatedString(data []byte) string {
-	i := bytes.Index(data, []byte{0})
-	return string(data[:i])
 }

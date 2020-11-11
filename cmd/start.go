@@ -30,7 +30,7 @@ starts <containerID>
 }
 
 func doStart(ctx *cli.Context) error {
-	fifoPath := clxc.RuntimePath(internal.SYNC_FIFO_PATH)
+	fifoPath := clxc.runtimePath(internal.SyncFifoPath)
 	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	log.Debug().Err(err).Str("fifo", fifoPath).Msg("open fifo")
 	if err != nil {
@@ -41,12 +41,12 @@ func doStart(ctx *cli.Context) error {
 	done := make(chan error)
 
 	go func() {
-		data := make([]byte, len(internal.SYNC_FIFO_CONTENT))
+		data := make([]byte, len(internal.SyncFifoContent))
 		n, err := f.Read(data)
 		if err != nil {
 			done <- errors.Wrapf(err, "problem reading from fifo")
 		}
-		if n != len(internal.SYNC_FIFO_CONTENT) || string(data) != internal.SYNC_FIFO_CONTENT {
+		if n != len(internal.SyncFifoContent) || string(data) != internal.SyncFifoContent {
 			done <- errors.Errorf("bad fifo content: %s", string(data))
 		}
 		done <- nil
@@ -56,6 +56,6 @@ func doStart(ctx *cli.Context) error {
 	case err := <-done:
 		return err
 	case <-time.After(clxc.StartTimeout):
-		return fmt.Errorf("timeout reading from syncfifo %s:", fifoPath)
+		return fmt.Errorf("timeout reading from syncfifo %s", fifoPath)
 	}
 }

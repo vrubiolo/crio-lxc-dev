@@ -12,7 +12,7 @@ import (
 
 func configureMounts(spec *specs.Spec) error {
 	// excplicitly disable auto-mounting
-	if err := clxc.SetConfigItem("lxc.mount.auto", ""); err != nil {
+	if err := clxc.setConfigItem("lxc.mount.auto", ""); err != nil {
 		return err
 	}
 
@@ -48,7 +48,7 @@ func configureMounts(spec *specs.Spec) error {
 
 		mnt := fmt.Sprintf("%s %s %s %s", ms.Source, ms.Destination, ms.Type, strings.Join(ms.Options, ","))
 
-		if err := clxc.SetConfigItem("lxc.mount.entry", mnt); err != nil {
+		if err := clxc.setConfigItem("lxc.mount.entry", mnt); err != nil {
 			return err
 		}
 	}
@@ -75,7 +75,7 @@ func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 		ms.Options = append(ms.Options, "create=file")
 		// source exists and is not a directory
 		// create a target file that can be used as target for a bind mount
-		err := os.MkdirAll(filepath.Dir(ms.Destination), 0755)
+		err := os.MkdirAll(filepath.Dir(ms.Destination), 0750)
 		log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create parent directory for file bind mount")
 		if err != nil {
 			return errors.Wrap(err, "failed to create mount destination dir")
@@ -90,7 +90,7 @@ func createMountDestination(spec *specs.Spec, ms *specs.Mount) error {
 	ms.Options = append(ms.Options, "create=dir")
 	// FIXME exclude all directories that are below other mounts
 	// only directories / files on the readonly rootfs must be created
-	err = os.MkdirAll(ms.Destination, 0755)
+	err = os.MkdirAll(ms.Destination, 0750)
 	log.Debug().Err(err).Str("dst:", ms.Destination).Msg("create mount destination directory")
 	if err != nil {
 		return errors.Wrap(err, "failed to create mount destination")

@@ -23,7 +23,7 @@ var killCmd = cli.Command{
 `,
 }
 
-const SIGZERO = unix.Signal(0)
+const sigzero = unix.Signal(0)
 
 var signalMap = map[string]unix.Signal{
 	"ABRT":   unix.SIGABRT,
@@ -66,7 +66,7 @@ var signalMap = map[string]unix.Signal{
 func getSignal(ctx *cli.Context) (unix.Signal, error) {
 	sig := ctx.Args().Get(1)
 	if len(sig) == 0 {
-		return SIGZERO, errors.New("missing signal")
+		return sigzero, errors.New("missing signal")
 	}
 
 	// handle numerical signal value
@@ -76,7 +76,7 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 				return signum, nil
 			}
 		}
-		return SIGZERO, fmt.Errorf("signal %s does not exist", sig)
+		return sigzero, fmt.Errorf("signal %s does not exist", sig)
 	}
 
 	// handle string signal value
@@ -88,7 +88,7 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 }
 
 func doKill(ctx *cli.Context) error {
-	err := clxc.LoadContainer()
+	err := clxc.loadContainer()
 	if err != nil {
 		return errors.Wrap(err, "failed to load container")
 	}

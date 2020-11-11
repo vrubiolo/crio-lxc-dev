@@ -17,15 +17,15 @@ import (
 )
 
 // time format used for logger
-const TimeFormatLXCMillis = "20060102150405.000"
+const timeFormatLXCMillis = "20060102150405.000"
 
 var log zerolog.Logger
 
-var ErrExist = errors.New("container already exists")
-var ErrContainerNotExist = errors.New("container does not exist")
+var errContainerNotExist = errors.New("container does not exist")
+var errContainerExist = errors.New("container already exists")
 
-type CrioLXC struct {
-	*lxc.Container
+type crioLXC struct {
+	Container *lxc.Container
 
 	Command string
 
@@ -62,22 +62,24 @@ type CrioLXC struct {
 	StartTimeout time.Duration
 }
 
-func (c CrioLXC) VersionString() string {
+var version string
+
+func versionString() string {
 	return fmt.Sprintf("%s (%s) (lxc:%s)", version, runtime.Version(), lxc.Version())
 }
 
-// RuntimePath builds an absolute filepath which is relative to the container runtime root.
-func (c *CrioLXC) RuntimePath(subPath ...string) string {
+// runtimePath builds an absolute filepath which is relative to the container runtime root.
+func (c *crioLXC) runtimePath(subPath ...string) string {
 	return filepath.Join(c.RuntimeRoot, c.ContainerID, filepath.Join(subPath...))
 }
 
-func (c *CrioLXC) LoadContainer() error {
+func (c *crioLXC) loadContainer() error {
 	// Check for container existence by looking for config file.
 	// Otherwise lxc.NewContainer will return an empty container
 	// struct and we'll report wrong info
-	_, err := os.Stat(c.RuntimePath("config"))
+	_, err := os.Stat(c.runtimePath("config"))
 	if os.IsNotExist(err) {
-		return ErrContainerNotExist
+		return errContainerNotExist
 	}
 	if err != nil {
 		return errors.Wrap(err, "failed to access config file")
@@ -87,50 +89,51 @@ func (c *CrioLXC) LoadContainer() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to load container")
 	}
-	if err := container.LoadConfigFile(c.RuntimePath("config")); err != nil {
+	if err := container.LoadConfigFile(c.runtimePath("config")); err != nil {
 		return err
 	}
 	c.Container = container
 	return nil
 }
 
-func (c *CrioLXC) CreateContainer() error {
-	_, err := os.Stat(c.RuntimePath("config"))
+func (c *crioLXC) createContainer() error {
+	_, err := os.Stat(c.runtimePath("config"))
 	if !os.IsNotExist(err) {
-		return ErrExist
+		return errContainerExist
 	}
 	container, err := lxc.NewContainer(c.ContainerID, c.RuntimeRoot)
 	if err != nil {
 		return err
 	}
 	c.Container = container
-	if err := os.MkdirAll(c.RuntimePath(), 0770); err != nil {
+	if err := os.MkdirAll(c.runtimePath(), 0770); err != nil {
 		return errors.Wrap(err, "failed to create container dir")
 	}
 	return nil
 }
 
 // Release releases/closes allocated resources (lxc.Container, LogFile)
-func (c CrioLXC) Release() {
+func (c crioLXC) release() error {
 	if c.Container != nil {
 		c.Container.Release()
 	}
 	if c.LogFile != nil {
-		c.LogFile.Close()
+		return c.LogFile.Close()
 	}
+	return nil
 }
 
-func (c CrioLXC) CanConfigure(keys ...string) bool {
+func supportsConfigItem(keys ...string) bool {
 	for _, key := range keys {
 		if !lxc.IsSupportedConfigItem(key) {
-			log.Info().Str("key:", key).Msg("unsupported lxc config item")
+			log.Debug().Str("key:", key).Msg("unsupported lxc config item")
 			return false
 		}
 	}
 	return true
 }
 
-func (c *CrioLXC) GetConfigItem(key string) string {
+func (c *crioLXC) getConfigItem(key string) string {
 	vals := c.Container.ConfigItem(key)
 	if len(vals) > 0 {
 		first := vals[0]
@@ -143,7 +146,7 @@ func (c *CrioLXC) GetConfigItem(key string) string {
 	return ""
 }
 
-func (c *CrioLXC) SetConfigItem(key, value string) error {
+func (c *crioLXC) setConfigItem(key, value string) error {
 	err := c.Container.SetConfigItem(key, value)
 	if err != nil {
 		log.Error().Err(err).Str("key:", key).Str("value:", value).Msg("lxc config")
@@ -153,14 +156,14 @@ func (c *CrioLXC) SetConfigItem(key, value string) error {
 	return errors.Wrap(err, "failed to set lxc config item '%s=%s'")
 }
 
-func (c *CrioLXC) configureLogging() error {
+func (c *crioLXC) configureLogging() error {
 	logDir := filepath.Dir(c.LogFilePath)
 	err := os.MkdirAll(logDir, 0750)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create log file directory %s", logDir)
 	}
 
-	f, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
+	f, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
 	if err != nil {
 		return errors.Wrapf(err, "failed to open log file %s", c.LogFilePath)
 	}
@@ -169,7 +172,7 @@ func (c *CrioLXC) configureLogging() error {
 	zerolog.TimestampFieldName = "t"
 	zerolog.LevelFieldName = "p"
 	zerolog.MessageFieldName = "m"
-	zerolog.TimeFieldFormat = TimeFormatLXCMillis
+	zerolog.TimeFieldFormat = timeFormatLXCMillis
 
 	// NOTE It's not possible change the possition of the timestamp.
 	// The ttimestamp is appended to the to the log output because it is dynamically rendered
@@ -221,18 +224,18 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 // - all resources created by crio-lxc (lxc config, init script, device creation script ...)
 // - lxc logfiles (if logging is setup per container)
 // - the runtime spec
-func (c *CrioLXC) BackupRuntimeResources() (backupDir string, err error) {
+func (c *crioLXC) backupRuntimeResources() (backupDir string, err error) {
 	backupDir = filepath.Join(c.BackupDir, c.ContainerID)
 	err = os.MkdirAll(c.BackupDir, 0755)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create backup dir")
 	}
-	err = runCommand("cp", "-r", "-p", clxc.RuntimePath(), backupDir)
+	err = runCommand("cp", "-r", "-p", clxc.runtimePath(), backupDir)
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy lxc runtime directory")
 	}
 	// remove syncfifo because it is not of any use and blocks 'grep' within the backup directory.
-	os.Remove(filepath.Join(backupDir, internal.SYNC_FIFO_PATH))
+	os.Remove(filepath.Join(backupDir, internal.SyncFifoPath))
 	err = runCommand("cp", clxc.SpecPath, backupDir)
 	if err != nil {
 		return backupDir, errors.Wrap(err, "failed to copy runtime spec to backup dir")
@@ -267,14 +270,14 @@ const (
 	envStateCreated = "CRIO_LXC_STATE=" + stateCreated
 )
 
-func (clxc *CrioLXC) getContainerState() (int, string, error) {
-	switch state := clxc.State(); state {
+func (c *crioLXC) getContainerState() (int, string, error) {
+	switch state := c.Container.State(); state {
 	case lxc.STARTING:
 		return 0, stateCreating, nil
 	case lxc.STOPPED:
 		return 0, stateStopped, nil
 	default:
-		return clxc.getContainerInitState()
+		return c.getContainerInitState()
 	}
 }
 
@@ -283,8 +286,8 @@ func (clxc *CrioLXC) getContainerState() (int, string, error) {
 // The init process environment contains #envStateCreated if the the container
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
-func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
-	pid, proc := clxc.safeGetInitPid()
+func (c *crioLXC) getContainerInitState() (int, string, error) {
+	pid, proc := c.safeGetInitPid()
 	if proc != nil {
 		defer proc.Close()
 	}
@@ -308,8 +311,8 @@ func (clxc *CrioLXC) getContainerInitState() (int, string, error) {
 	return pid, stateRunning, nil
 }
 
-func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File) {
-	pid = c.InitPid()
+func (c *crioLXC) safeGetInitPid() (pid int, proc *os.File) {
+	pid = c.Container.InitPid()
 	if pid <= 0 {
 		// Errors returned from safeGetInitPid indicate that the init process has died.
 		return 0, nil
@@ -320,7 +323,7 @@ func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File) {
 
 	// double check that the init process still exists, and the proc
 	// directory actually belongs to the init process.
-	pid2 := c.InitPid()
+	pid2 := c.Container.InitPid()
 	if pid2 != pid {
 		if proc != nil {
 			proc.Close()
@@ -340,11 +343,11 @@ func (c *CrioLXC) safeGetInitPid() (pid int, proc *os.File) {
 	return pid, proc
 }
 
-func (clxc *CrioLXC) waitContainerCreated(timeout time.Duration) error {
+func (c *crioLXC) waitContainerCreated(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		log.Trace().Msg("poll for container init state")
-		pid, state, err := clxc.getContainerInitState()
+		pid, state, err := c.getContainerInitState()
 		if err != nil {
 			return errors.Wrap(err, "failed to wait for container container creation")
 		}
