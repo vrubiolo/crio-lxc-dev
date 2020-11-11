@@ -251,7 +251,7 @@ func configureRootfs(spec *specs.Spec) error {
 }
 
 func configureInit(spec *specs.Spec) error {
-	err := os.MkdirAll(filepath.Join(spec.Root.Path, internal.ConfigDir), 0755)
+	err := os.MkdirAll(filepath.Join(spec.Root.Path, internal.ConfigDir), 0)
 	if err != nil {
 		return errors.Wrapf(err, "Failed creating %s in rootfs", internal.ConfigDir)
 	}
@@ -269,7 +269,7 @@ func configureInit(spec *specs.Spec) error {
 		Source:      clxc.runtimePath(internal.ConfigDir),
 		Destination: strings.Trim(internal.ConfigDir, "/"),
 		Type:        "bind",
-		Options:     []string{"bind", "ro"},
+		Options:     []string{"bind", "ro", "nodev", "nosuid"},
 	})
 
 	// pass context information as environment variables to hook scripts
@@ -295,7 +295,7 @@ func configureInit(spec *specs.Spec) error {
 
 	// create destination file for bind mount
 	initBin := clxc.runtimePath(internal.InitCmd)
-	err = touchFile(initBin, 0750)
+	err = touchFile(initBin, 0)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create %s", initBin)
 	}
@@ -303,7 +303,7 @@ func configureInit(spec *specs.Spec) error {
 		Source:      clxc.InitCommand,
 		Destination: internal.InitCmd,
 		Type:        "bind",
-		Options:     []string{"bind", "ro"},
+		Options:     []string{"bind", "ro", "nosuid"},
 	})
 	return clxc.setConfigItem("lxc.init.cmd", internal.InitCmd)
 }
