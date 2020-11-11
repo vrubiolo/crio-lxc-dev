@@ -106,7 +106,7 @@ func (c *crioLXC) createContainer() error {
 		return err
 	}
 	c.Container = container
-	if err := os.MkdirAll(c.runtimePath(), 0770); err != nil {
+	if err := os.MkdirAll(c.runtimePath(), 0700); err != nil {
 		return errors.Wrap(err, "failed to create container dir")
 	}
 	return nil
@@ -115,7 +115,9 @@ func (c *crioLXC) createContainer() error {
 // Release releases/closes allocated resources (lxc.Container, LogFile)
 func (c crioLXC) release() error {
 	if c.Container != nil {
-		c.Container.Release()
+		if err := c.Container.Release(); err != nil {
+			log.Error().Err(err).Msg("failed to release container")
+		}
 	}
 	if c.LogFile != nil {
 		return c.LogFile.Close()
@@ -226,7 +228,7 @@ func parseLogLevel(s string) (lxc.LogLevel, error) {
 // - the runtime spec
 func (c *crioLXC) backupRuntimeResources() (backupDir string, err error) {
 	backupDir = filepath.Join(c.BackupDir, c.ContainerID)
-	err = os.MkdirAll(c.BackupDir, 0755)
+	err = os.MkdirAll(c.BackupDir, 0700)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create backup dir")
 	}
