@@ -12,24 +12,20 @@ import (
 )
 
 const (
-	// IMPORTANT should be synced with the runtime-spec dependency in go.mod
-	// github.com/opencontainers/runtime-spec v1.0.2
-	CURRENT_OCI_VERSION = "1.0.2"
 	// Environment variables are populated by default from this environment file.
 	// Existing environment variables are preserved.
-	EnvFileDefault = "/etc/default/crio-lxc"
-	// This environment variable can be used to overwrite the path in EnvFileDefault.
-	EnvFileVar = "CRIO_LXC_DEFAULTS"
+	envFileDefault = "/etc/default/crio-lxc"
+	// This environment variable can be used to overwrite the path in envFileDefault.
+	envFileVar = "CRIO_LXC_DEFAULTS"
 )
 
-var version string
-var clxc CrioLXC
+var clxc crioLXC
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "crio-lxc"
 	app.Usage = "crio-lxc is a CRI compliant runtime wrapper for lxc"
-	app.Version = clxc.VersionString()
+	app.Version = versionString()
 	app.Commands = []*cli.Command{
 		&stateCmd,
 		&createCmd,
@@ -194,8 +190,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "undefined subcommand %q cmdline%s\n", cmd, os.Args)
 	}
 
-	envFile := EnvFileDefault
-	if s, isSet := os.LookupEnv(EnvFileVar); isSet {
+	envFile := envFileDefault
+	if s, isSet := os.LookupEnv(envFileVar); isSet {
 		envFile = s
 	}
 	if err := loadEnvDefaults(envFile); err != nil {
@@ -211,7 +207,9 @@ func main() {
 		log.Info().Dur("duration:", cmdDuration).Msg("cmd done")
 	}
 
-	clxc.Release()
+	if err := clxc.release(); err != nil {
+		log.Error().Err(err).Msg("failed to release container")
+	}
 	if err != nil {
 		// write diagnostics message to stderr for crio/kubelet
 		println(err.Error())
@@ -247,7 +245,10 @@ func loadEnvDefaults(envFile string) error {
 		val := strings.Trim(strings.TrimSpace(vals[1]), `"'`)
 		// existing environment variables have precedence
 		if _, exist := os.LookupEnv(key); !exist {
-			os.Setenv(key, val)
+			err := os.Setenv(key, val)
+			if err != nil {
+				return errors.Wrap(err, "setenv failed")
+			}
 		}
 	}
 	return nil

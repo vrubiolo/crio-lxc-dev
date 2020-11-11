@@ -23,26 +23,26 @@ var stateCmd = cli.Command{
 }
 
 func doState(ctx *cli.Context) error {
-	err := clxc.LoadContainer()
+	err := clxc.loadContainer()
 	if err != nil {
 		return errors.Wrapf(err, "failed to load container")
 	}
 
 	// TODO save BundlePath to init spec
-	bundlePath := filepath.Join("/var/run/containers/storage/overlay-containers/", clxc.Name(), "userdata")
+	bundlePath := filepath.Join("/var/run/containers/storage/overlay-containers/", clxc.Container.Name(), "userdata")
 
 	s := specs.State{
-		Version: CURRENT_OCI_VERSION,
-		ID:      clxc.Name(),
+		Version: specs.Version,
+		ID:      clxc.Container.Name(),
 		Bundle:  bundlePath,
 	}
 
 	s.Pid, s.Status, err = clxc.getContainerState()
 	log.Debug().Int("pid:", s.Pid).Str("state:", s.Status).Msg("container state")
 
-	if stateJson, err := json.Marshal(s); err == nil {
-		fmt.Fprint(os.Stdout, string(stateJson))
-		log.Trace().RawJSON("state:", stateJson).Msg("container state")
+	if stateJSON, err := json.Marshal(s); err == nil {
+		fmt.Fprint(os.Stdout, string(stateJSON))
+		log.Trace().RawJSON("state:", stateJSON).Msg("container state")
 	} else {
 		return errors.Wrap(err, "failed to marshal json")
 	}
