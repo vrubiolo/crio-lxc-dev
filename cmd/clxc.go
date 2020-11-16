@@ -315,20 +315,24 @@ const (
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
 func (c *crioLXC) getContainerState() (int, string, error) {
+	pid, proc, state, err := c.safeGetContainerState()
+	if proc != nil {
+		proc.Close()
+	}
+	return pid, state, err
+}
+
+func (c *crioLXC) safeGetContainerState() (pid int, proc *os.File, state string, err error) {
 	switch state := c.Container.State(); state {
 	case lxc.STARTING:
-		return 0, stateCreating, nil
+		return 0, nil, stateCreating, nil
 	case lxc.STOPPED:
-		return 0, stateStopped, nil
+		return 0, nil, stateStopped, nil
 	}
 
-	pid, proc := c.safeGetInitPid()
-	if proc != nil {
-		// #nosec
-		defer proc.Close()
-	}
+	pid, proc = c.safeGetInitPid()
 	if pid <= 0 {
-		return 0, stateStopped, nil
+		return 0, proc, stateStopped, nil
 	}
 
 	envFile := fmt.Sprintf("/proc/%d/environ", pid)
@@ -336,16 +340,16 @@ func (c *crioLXC) getContainerState() (int, string, error) {
 	data, err := ioutil.ReadFile(envFile)
 	if err != nil {
 		// This is fatal. It should not happen because a filehandle to /proc/%d is open.
-		return 0, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
+		return 0, proc, stateStopped, errors.Wrapf(err, "failed to read init process environment %s", envFile)
 	}
 
 	environ := strings.Split(string(data), "\000")
 	for _, env := range environ {
 		if env == envStateCreated {
-			return pid, stateCreated, nil
+			return pid, proc, stateCreated, nil
 		}
 	}
-	return pid, stateRunning, nil
+	return pid, proc, stateRunning, nil
 }
 
 func (c *crioLXC) safeGetInitPid() (pid int, proc *os.File) {
