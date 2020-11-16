@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -80,12 +82,9 @@ func configureCgroupPath(linux *specs.Linux) error {
 		}
 	}
 
-	// already done by liblxc recursively (enable TRACE to see cgroups details)
-	/*
-		if err := enableControllers(cgPath); err != nil {
-			return err
-		}
-	*/
+	if err := enableControllers(cgPath); err != nil {
+		return err
+	}
 
 	if supportsConfigItem("lxc.cgroup.dir.monitor.pivot") {
 		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
@@ -103,19 +102,19 @@ func enableControllers(cgPath cgroupPath) error {
 	}
 	controllers := strings.Split(strings.TrimSpace(string(data)), " ")
 
-	var sb strings.Builder
-	for i, c := range controllers {
-		if i > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteByte('+')
-		sb.WriteString(c)
+	subtreeControl, err := os.OpenFile(filepath.Join("/sys/fs/cgroup", cgPath.SlicePath(), "cgroup.subtree_control"), os.O_WRONLY, 0)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open cgroup.subtree_control in %s", cgPath.SlicePath())
 	}
-	sb.WriteByte('\n')
-
-	log.Warn().Str("group.subtree_control", sb.String()).Str("cgroup", cgPath.SlicePath()).Msg("enable controllers")
-	subtreeControl := filepath.Join("/sys/fs/cgroup", cgPath.SlicePath(), "cgroup.subtree_control")
-	return ioutil.WriteFile(subtreeControl, []byte(sb.String()), 0)
+	// #nosec
+	defer subtreeControl.Close()
+	for _, ctrl := range controllers {
+		_, err := fmt.Fprintf(subtreeControl, "+%s\n", ctrl)
+		if err != nil {
+			return errors.Wrapf(err, "failed to enable controller %s in %s", ctrl, cgPath.SlicePath())
+		}
+	}
+	return nil
 }
 
 func configureDeviceController(spec *specs.Spec) error {
