@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -70,48 +68,20 @@ func configureCgroupPath(linux *specs.Linux) error {
 	// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
 	// checking for on of the config items shuld be enough, because they were introduced together ...
 	if supportsConfigItem("lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor") {
-		if err := clxc.setConfigItem("lxc.cgroup.dir.container", cgPath.ScopePath()); err != nil {
+		if err := clxc.setConfigItem("lxc.cgroup.dir.container", cgPath.String()); err != nil {
 			return err
 		}
 		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor", filepath.Join(clxc.MonitorCgroup, clxc.Container.Name()+".scope")); err != nil {
 			return err
 		}
 	} else {
-		if err := clxc.setConfigItem("lxc.cgroup.dir", cgPath.ScopePath()); err != nil {
+		if err := clxc.setConfigItem("lxc.cgroup.dir", cgPath.String()); err != nil {
 			return err
 		}
 	}
-
-	if err := enableControllers(cgPath); err != nil {
-		return err
-	}
-
 	if supportsConfigItem("lxc.cgroup.dir.monitor.pivot") {
 		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func enableControllers(cgPath cgroupPath) error {
-	// enable all available controllers in the scope
-	data, err := ioutil.ReadFile(filepath.Join("/sys/fs/cgroup", cgPath.SlicePath(), "cgroup.controllers"))
-	if err != nil {
-		return errors.Wrapf(err, "failed to read cgroup.controllers in %s", cgPath.SlicePath())
-	}
-	controllers := strings.Split(strings.TrimSpace(string(data)), " ")
-
-	subtreeControl, err := os.OpenFile(filepath.Join("/sys/fs/cgroup", cgPath.SlicePath(), "cgroup.subtree_control"), os.O_WRONLY, 0)
-	if err != nil {
-		return errors.Wrapf(err, "failed to open cgroup.subtree_control in %s", cgPath.SlicePath())
-	}
-	// #nosec
-	defer subtreeControl.Close()
-	for _, ctrl := range controllers {
-		_, err := fmt.Fprintf(subtreeControl, "+%s\n", ctrl)
-		if err != nil {
-			return errors.Wrapf(err, "failed to enable controller %s in %s", ctrl, cgPath.SlicePath())
 		}
 	}
 	return nil
@@ -180,7 +150,7 @@ func configureDeviceController(spec *specs.Spec) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
+			return fmt.Errorf("Invalid cgroup2 device - invalid type (allow:%t %s %s:%s %s)", dev.Allow, dev.Type, maj, min, dev.Access)
 		}
 	}
 	return nil
@@ -233,12 +203,8 @@ type cgroupPath struct {
 	Scope  string
 }
 
-func (cg cgroupPath) ScopePath() string {
+func (cg cgroupPath) String() string {
 	return filepath.Join(append(cg.Slices, cg.Scope)...)
-}
-
-func (cg cgroupPath) SlicePath() string {
-	return filepath.Join(cg.Slices...)
 }
 
 // kubernetes creates the cgroup hierarchy which can be changed by serveral cgroup related flags.
