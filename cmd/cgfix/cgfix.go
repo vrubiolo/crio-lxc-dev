@@ -53,6 +53,7 @@ func fmtControllers(controllers ...string) string {
 }
 
 func loadControllers(cgroupPath string) ([]string, error) {
+  // #nosec
 	data, err := ioutil.ReadFile(filepath.Join(cgroupPath, "cgroup.controllers"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cgroup.controllers: %s", err)
