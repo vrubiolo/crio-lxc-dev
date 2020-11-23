@@ -45,9 +45,10 @@ func doState(ctx *cli.Context) error {
 		Annotations: spec.Annotations,
 	}
 
-	_, s.Status = clxc.getContainerState()
+	_, state := clxc.getContainerState()
+	s.Status = string(state)
 
-	log.Info().Int("pid", s.Pid).Str("status", string(s.Status)).Msg("container state")
+	log.Info().Int("pid", s.Pid).Str("status", s.Status).Msg("container state")
 
 	if stateJSON, err := json.Marshal(s); err == nil {
 		fmt.Fprint(os.Stdout, string(stateJSON))

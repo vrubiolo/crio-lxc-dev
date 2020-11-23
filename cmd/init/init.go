@@ -39,12 +39,13 @@ func main() {
 	}
 }
 
-func setHome(env []string, userName string, cwd string) []string {
+func setHome(env []string, userName string, fallback string) []string {
 	// Use existing HOME environment variable.
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "HOME=") {
 			return env
 		}
+		return env
 	}
 	// Or lookup users home directory in passwd.
 	if userName != "" {
@@ -53,9 +54,6 @@ func setHome(env []string, userName string, cwd string) []string {
 			return append(env, "HOME="+u.HomeDir)
 		}
 	}
-	if cwd != "" {
-		return append(env, "HOME="+cwd)
-	}
-
-	return append(env, "HOME=/")
+	// Use the provided fallback path as last resort.
+	return append(env, "HOME="+fallback)
 }
