@@ -41,12 +41,12 @@ func doState(ctx *cli.Context) error {
 		Version:     specs.Version,
 		ID:          clxc.Container.Name(),
 		Bundle:      clxc.BundlePath,
+		Pid:         pid,
 		Annotations: spec.Annotations,
 	}
 
-	pid, state := clxc.getContainerState()
+	_, state := clxc.getContainerState()
 	s.Status = string(state)
-	s.Pid = pid
 
 	log.Info().Int("pid", s.Pid).Str("status", s.Status).Msg("container state")
 

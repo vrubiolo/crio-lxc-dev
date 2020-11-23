@@ -3,10 +3,9 @@ package internal
 import (
 	"encoding/json"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	//	"github.com/pkg/errors"
+	"github.com/pkg/errors"
 	"os"
-	//	"time"
-	"encoding/binary"
+	"time"
 )
 
 const (
@@ -14,6 +13,8 @@ const (
 	ConfigDir = "/.crio-lxc"
 	// SyncFifoPath is the path to the fifo used to block container start in init until start cmd is called.
 	SyncFifoPath = ConfigDir + "/syncfifo"
+	// SyncFifoContent is the content exchanged through the sync fifo.
+	SyncFifoContent = "meshuggah rocks"
 	// InitCmd is the path where the init binary is bind mounted.
 	InitCmd = ConfigDir + "/init"
 	// InitSpec is the path where the modified runtime spec is written to.
@@ -59,12 +60,35 @@ func WriteFifo() error {
 	if err != nil {
 		return err
 	}
-
-	buf := make([]byte, binary.MaxVarintLen64)
-	n := binary.PutVarint(buf, int64(os.Getpid()))
-	_, err = f.Write(buf[:n])
+	_, err = f.Write([]byte(SyncFifoContent))
 	if err != nil {
 		return err
 	}
 	return f.Close()
+}
+
+// ReadFifo reads the content from the SyncFifo that was written by #WriteFifo.
+// The read operation is aborted after the given timeout.
+func ReadFifo(fifoPath string, timeout time.Duration) error {
+	// #nosec
+	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+	if err != nil {
+		return errors.Wrap(err, "failed to open sync fifo")
+	}
+	err = f.SetDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return errors.Wrap(err, "failed to set deadline")
+	}
+	// #nosec
+	defer f.Close()
+
+	data := make([]byte, len(SyncFifoContent))
+	n, err := f.Read(data)
+	if err != nil {
+		return errors.Wrap(err, "problem reading from fifo")
+	}
+	if n != len(SyncFifoContent) || string(data) != SyncFifoContent {
+		return errors.Errorf("bad fifo content: %s", string(data))
+	}
+	return nil
 }

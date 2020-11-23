@@ -120,6 +120,10 @@ func (c *crioLXC) readPidFile() (int, error) {
 	return readPidFile(c.PidFile)
 }
 
+func (c *crioLXC) createPidFile(pid int) error {
+	return createPidFile(c.PidFile, pid)
+}
+
 func (c *crioLXC) readSpec() (*specs.Spec, error) {
 	return internal.ReadSpec(clxc.runtimePath(internal.InitSpec))
 }

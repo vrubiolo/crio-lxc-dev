@@ -26,12 +26,6 @@ func configureCgroup(spec *specs.Spec) error {
 		return err
 	}
 
-	/*
-		if err := clxc.setConfigItem("lxc.cgroup.use", "cpuset,cpu,io,memory,hugetlb,pids,rdma"); err != nil {
-			return err
-		}
-	*/
-
 	if devices := spec.Linux.Resources.Devices; devices != nil {
 		if err := configureDeviceController(spec); err != nil {
 			return err
@@ -76,6 +70,11 @@ func configureCgroupPath(linux *specs.Linux) error {
 	}
 	cgPath := parseSystemdCgroupPath(linux.CgroupsPath)
 
+	/*
+		if err := enableCgroupControllers(cgPath); err != nil {
+			return errors.Wrapf(err, "cgroup path error")
+		}
+	*/
 	// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
 	// checking for on of the config items shuld be enough, because they were introduced together ...
 	if supportsConfigItem("lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor") {
@@ -94,23 +93,6 @@ func configureCgroupPath(linux *specs.Linux) error {
 		if err := clxc.setConfigItem("lxc.cgroup.dir.monitor.pivot", clxc.MonitorCgroup); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func createCgroupsRecursively(cgPath cgroupPath) error {
-	for i, _ := range cgPath.Slices {
-		parentCg := filepath.Join("/sys/fs/cgroup", filepath.Join(cgPath.Slices[0:i+1]...))
-		if err := os.MkdirAll(parentCg, 755); err != nil {
-			return errors.Wrapf(err, "failed to create cgroup dir %s", parentCg)
-		}
-		err := ioutil.WriteFile(filepath.Join(parentCg, "cgroup.subtree_control"), []byte("+cpuset +cpu +io +memory +hugetlb +pids +rdma\n"), 0)
-		if err != nil {
-			return errors.Wrapf(err, "failed to enable controllers in cgroup %s", parentCg)
-		}
-	}
-	if err := os.MkdirAll(cgPath.String(), 755); err != nil {
-		return errors.Wrapf(err, "failed to create cgroup scope %s", cgPath.String())
 	}
 	return nil
 }
