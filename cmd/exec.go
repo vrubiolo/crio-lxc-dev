@@ -121,7 +121,7 @@ func doExec(ctx *cli.Context) error {
 			log.Warn().Msg("detaching process but pid-file value is empty")
 			return nil
 		}
-		return createPidFile(pidFile, pid)
+		return createPidFile(pidFile, int64(pid))
 	}
 
 	exitStatus, err := c.RunCommandStatus(procArgs, attachOpts)

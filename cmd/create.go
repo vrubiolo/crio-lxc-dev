@@ -99,8 +99,7 @@ func doCreateInternal(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to start container process")
 	}
 	log.Info().Int("pid", startCmd.Process.Pid).Msg("started container process")
-	return clxc.createPidFile(startCmd.Process.Pid)
-
+	return nil
 }
 
 func configureContainer(spec *specs.Spec) error {
