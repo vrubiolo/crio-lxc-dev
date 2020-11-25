@@ -29,8 +29,8 @@ crio-lxc-init: cmd/init/crio-lxc-init.c
 	# ensure that crio-lxc-init is statically compiled
 	! ldd $@  2>/dev/null
 
-crio-lxc-container-hook: $(GO_SRC) Makefile go.mod
-	go build -ldflags '$(LDFLAGS) -extldflags "-static"' -o $@ ./cmd/container-hook
+crio-lxc-container-hook: cmd/container-hook/hook.c
+	musl-gcc -DDEBUG -Wall -Wpedantic $? -o $@
 
 # make test TEST=basic will run only the basic test.
 .PHONY: check

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	"os"
 	"time"
 )
 
@@ -32,14 +34,14 @@ func doStart(ctx *cli.Context) error {
 		return err
 	}
 
-	return readFifo(clxc.runtimePath(internal.SyncFifoPath), clxc.StartTimeout)
+	return readFifo(clxc.StartTimeout)
 }
 
 // ReadFifo reads the content from the SyncFifo that was written by #WriteFifo.
 // The read operation is aborted after the given timeout.
-func ReadFifo(fifoPath string, timeout time.Duration) error {
+func readFifo(timeout time.Duration) error {
 	// #nosec
-	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+	f, err := os.OpenFile(clxc.runtimePath(syncFifoPath), os.O_RDONLY, 0)
 	if err != nil {
 		return errors.Wrap(err, "failed to open sync fifo")
 	}
@@ -50,12 +52,12 @@ func ReadFifo(fifoPath string, timeout time.Duration) error {
 	// #nosec
 	defer f.Close()
 
-	data := make([]byte, len(SyncFifoContent))
-	n, err := f.Read(data)
+	data := make([]byte, len(clxc.ContainerID))
+	_, err = f.Read(data)
 	if err != nil {
 		return errors.Wrap(err, "problem reading from fifo")
 	}
-	if n != len(SyncFifoContent) || string(data) != SyncFifoContent {
+	if clxc.ContainerID != string(data) {
 		return errors.Errorf("bad fifo content: %s", string(data))
 	}
 	return nil

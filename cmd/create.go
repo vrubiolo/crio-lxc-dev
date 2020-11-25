@@ -78,14 +78,14 @@ func doCreateInternal(ctx *cli.Context) error {
 		return fmt.Errorf("LXC runtime version >= 4.0.5 required, but was %s", lxc.Version())
 	}
 
+	spec, err := clxc.readSpec()
+	if err != nil {
+		return errors.Wrap(err, "couldn't load bundle spec")
+	}
+
 	err = clxc.createContainer()
 	if err != nil {
 		return errors.Wrap(err, "failed to create container")
-	}
-
-	spec, err := readSpec()
-	if err != nil {
-		return errors.Wrap(err, "couldn't load bundle spec")
 	}
 
 	if err := configureContainer(spec); err != nil {
@@ -513,36 +513,64 @@ func runStartCmd(cmd *exec.Cmd, spec *specs.Spec) error {
 		return err
 	}
 
-  // create devices file
-  // name type 
-  "/dev/console c 0 0"
-
-  // chown.txt
-  // chmod.txt
-
-	if err := writeSpec(spec); err != nil {
-		return errors.Wrapf(err, "failed to write init spec")
+	if err := writeDevices(spec); err != nil {
+		return errors.Wrap(err, "failed to create devices.txt")
 	}
+
+	if err := writeMasked(spec); err != nil {
+		return errors.Wrap(err, "failed to create masked.txt file")
+	}
+
 	return cmd.Start()
 }
 
+func writeDevices(spec *specs.Spec) error {
+	if spec.Linux.Devices == nil {
+		return nil
+	}
+	f, err := os.OpenFile(clxc.runtimePath("devices.txt"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	for _, d := range spec.Linux.Devices {
+		uid := spec.Process.User.UID // FIXME use 0 instead ?
+		if d.UID != nil {
+			uid = *d.UID
+		}
+		gid := spec.Process.User.GID // FIXME use 0 instead ?
+		if d.GID == nil {
+			gid = *d.GID
+		}
+		mode := os.FileMode(0600)
+		if d.FileMode != nil {
+			mode = *d.FileMode
+		}
+		_, err = fmt.Fprintf(f, "%s %s %d %d %o %d:%d\n", d.Path, d.Type, d.Major, d.Minor, mode, uid, gid)
+		if err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
 func writeMasked(spec *specs.Spec) error {
-  // #nosec
-  if spec.Linux.MaskedPaths == nil {
-    return nil
-  }
-  f, err := os.OpenFile(c.runtimePath("masked.txt", os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
-  if err != nil {
-    return err
-  }
-  for _, p := range spec.Linux.MaskedPaths {
-    _ err := fmt.Fprintln(f, p) 
-    if err != nil {
-      f.Close()
-      return err
-    }
-  }
-  return f.Close()
+	// #nosec
+	if spec.Linux.MaskedPaths == nil {
+		return nil
+	}
+	f, err := os.OpenFile(clxc.runtimePath("masked.txt"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	for _, p := range spec.Linux.MaskedPaths {
+		_, err = fmt.Fprintln(f, p)
+		if err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
 }
 
 func runStartCmdConsole(cmd *exec.Cmd, consoleSocket string) error {

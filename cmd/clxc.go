@@ -29,9 +29,9 @@ const (
 	// ConfigDir is the path to the crio-lxc resources relative to the container rootfs.
 	configDir = "/.crio-lxc"
 	// SyncFifoPath is the path to the fifo used to block container start in init until start cmd is called.
-	syncFifoPath = ConfigDir + "/syncfifo"
+	syncFifoPath = configDir + "/syncfifo"
 	// InitCmd is the path where the init binary is bind mounted.
-	initCmd = ConfigDir + "/init"
+	initCmd = configDir + "/init"
 )
 
 // ContainerState represents the state of a container.
@@ -114,6 +114,9 @@ func versionString() string {
 func (c *crioLXC) runtimePath(subPath ...string) string {
 	return filepath.Join(c.RuntimeRoot, c.ContainerID, filepath.Join(subPath...))
 }
+func (c *crioLXC) bundlePath(subPath ...string) string {
+	return filepath.Join(c.BundlePath, filepath.Join(subPath...))
+}
 
 func (c *crioLXC) configFilePath() string {
 	return c.runtimePath("config")
@@ -127,8 +130,24 @@ func (c *crioLXC) createPidFile(pid int) error {
 	return createPidFile(c.PidFile, pid)
 }
 
+// ReadSpec deserializes the JSON encoded runtime spec from the given path.
 func (c *crioLXC) readSpec() (*specs.Spec, error) {
-	return readSpec(clxc.runtimePath(internal.InitSpec))
+	// #nosec
+	// FIXME set this once
+	c.SpecPath = c.bundlePath("config.json")
+
+	specFile, err := os.Open(c.SpecPath)
+	if err != nil {
+		return nil, err
+	}
+	// #nosec
+	defer specFile.Close()
+	spec := &specs.Spec{}
+	err = json.NewDecoder(specFile).Decode(spec)
+	if err != nil {
+		return nil, err
+	}
+	return spec, nil
 }
 
 // loadContainer checks for the existence of the lxc config file.
@@ -162,7 +181,6 @@ func (c *crioLXC) loadContainer() error {
 // createContainer creates a new container.
 // It must only be called once during the lifecycle of a container.
 func (c *crioLXC) createContainer() error {
-	// avoid creating a container
 	if _, err := os.Stat(c.configFilePath()); err == nil {
 		return errContainerExist
 	}
@@ -181,8 +199,6 @@ func (c *crioLXC) createContainer() error {
 	if err := f.Close(); err != nil {
 		return errors.Wrap(err, "failed to close empty config file")
 	}
-
-	c.SpecPath = filepath.Join(clxc.BundlePath, "config.json")
 
 	if err := c.writeBundleConfig(); err != nil {
 		return err
@@ -438,7 +454,7 @@ func (c *crioLXC) getContainerState() (ContainerState, error) {
 		return StateCreating, nil
 	}
 
-	commPath := fmt.Sprintf("/proc/%d/task/%d/comm", pid)
+	commPath := fmt.Sprintf("/proc/%d/task/%d/comm", pid, pid)
 	comm, err := ioutil.ReadFile(commPath)
 	if err != nil {
 		// can not determine state, caller may try again
