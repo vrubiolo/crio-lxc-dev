@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/prctl.h>
+#include <pwd.h>
 
 #ifndef PREFIX
 #define PREFIX "/.crio-lxc/"
@@ -53,6 +54,7 @@ int readlines(const char* path, char *buf, int buflen, char **lines, int maxline
   
   errno = 0;
   for(n = 0; n < maxlines-1; n++) {
+    // https://pubs.opengroup.org/onlinepubs/009696699/functions/fgets.html
     line = fgets(buf, buflen, f);
     if (line == NULL) 
       break;
@@ -70,7 +72,7 @@ int readlines(const char* path, char *buf, int buflen, char **lines, int maxline
 }
 
 
-// https://pubs.opengroup.org/onlinepubs/000095399/basedefs/xbd_chap08.html
+// https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html#tag_08_01
 int load_environment(const char* path, char *buf, int buflen) {
   FILE *f;
 
@@ -129,6 +131,23 @@ int load_environment(const char* path, char *buf, int buflen) {
   return fclose(f);
 }
 
+int sethome() {
+  struct passwd *pw;
+
+  if (getenv("HOME") != NULL) {
+    return 0;
+  }
+  pw = getpwuid(geteuid());
+  if (pw != NULL) {
+   if (pw->pw_dir != NULL)
+     return setenv("HOME",  pw->pw_dir, 0);
+  }
+  // This is best effort so we ignore the errno set by getpwuid.
+  if (errno != 0)
+    errno = 0;
+  return setenv("HOME", "/", 0);
+}
+
 int main(int argc, char** argv)
 {
   // Buffer for reading arguments and environment variables.
@@ -153,15 +172,20 @@ int main(int argc, char** argv)
 
   if (readlines(cmdline_path, buf, sizeof(buf), args, sizeof(args)) == -1){
     perror("failed to read cmdline file");
-    exit(1);
+    exit(2);
    }
   
   // environment is already cleared by liblxc
   //environ = NULL;
   if (load_environment(environ_path, buf, sizeof(buf)) == -1){
     perror("failed to read environment file");
-    exit(1);
+    exit(3);
    }
+  
+  if (sethome() == -1) {
+    perror("failed to set HOME");
+    exit(4);
+  }
 
   // The proc name is used to detect that container is created. 
   // On execve the process name is reset to the name of the new executable file
@@ -171,7 +195,7 @@ int main(int argc, char** argv)
 
   if (writefifo(syncfifo, cid) == -1) {
     perror("failed to write syncfifo");
-    exit(1);
+    exit(5);
   }
       
   execvp(args[0],args);
