@@ -22,15 +22,6 @@ fi
 if [ -f $RUN/masked.txt ]; then
   for p in $(cat $RUN/masked.txt); do
     echo $masked 
-    #mount
-#    117   err := unix.Mount("/dev/null", p, "", unix.MS_BIND, "")
-#118   if os.IsNotExist(err) {
-#119     return nil
-#120   }
-#121   if err == unix.ENOTDIR {
-#122     return unix.Mount("tmpfs", p, "tmpfs", unix.MS_RDONLY, "")
-#123   }
-#124   return err
   done
 fi
 

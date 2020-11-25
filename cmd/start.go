@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"os"
@@ -20,7 +21,7 @@ starts <containerID>
 			Name:        "timeout",
 			Usage:       "timeout for reading from syncfifo",
 			EnvVars:     []string{"CRIO_LXC_START_TIMEOUT"},
-			Value:       time.Second * 60,
+			Value:       time.Second * 5,
 			Destination: &clxc.StartTimeout,
 		},
 	},
@@ -34,21 +35,26 @@ func doStart(ctx *cli.Context) error {
 		return err
 	}
 
-	return readFifo(clxc.StartTimeout)
+	done := make(chan error)
+	go func() {
+		done <- readFifo()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(clxc.StartTimeout):
+		return fmt.Errorf("timeout reading from syncfifo")
+	}
 }
 
-// ReadFifo reads the content from the SyncFifo that was written by #WriteFifo.
-// The read operation is aborted after the given timeout.
-func readFifo(timeout time.Duration) error {
+func readFifo() error {
 	// #nosec
 	f, err := os.OpenFile(clxc.runtimePath(syncFifoPath), os.O_RDONLY, 0)
 	if err != nil {
 		return errors.Wrap(err, "failed to open sync fifo")
 	}
-	err = f.SetDeadline(time.Now().Add(timeout))
-	if err != nil {
-		return errors.Wrap(err, "failed to set deadline")
-	}
+	// can not set deadline on fifo
 	// #nosec
 	defer f.Close()
 

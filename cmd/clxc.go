@@ -461,7 +461,9 @@ func (c *crioLXC) getContainerState() (ContainerState, error) {
 		return StateStopped, err
 	}
 
-	if strings.HasPrefix(c.ContainerID, string(comm)) {
+	// comm contains a trailing newline
+	if strings.TrimSpace(string(comm)) == "init" {
+		//if strings.HasPrefix(c.ContainerID, strings.TrimSpace(string(comm))) {
 		return StateCreated, nil
 	}
 

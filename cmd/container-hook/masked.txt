@@ -1,3 +1,0 @@
-/foo/bar
-/blub
-/x/a/b/c

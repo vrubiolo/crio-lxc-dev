@@ -64,13 +64,7 @@ var signalMap = map[string]unix.Signal{
 	"XFSZ":   unix.SIGXFSZ,
 }
 
-// Retrieve the PID from container init process safely.
-func getSignal(ctx *cli.Context) (unix.Signal, error) {
-	sig := ctx.Args().Get(1)
-	if len(sig) == 0 {
-		return sigzero, errors.New("missing signal")
-	}
-
+func parseSignal(sig string) (unix.Signal, error) {
 	// handle numerical signal value
 	if num, err := strconv.Atoi(sig); err == nil {
 		for _, signum := range signalMap {
@@ -78,20 +72,25 @@ func getSignal(ctx *cli.Context) (unix.Signal, error) {
 				return signum, nil
 			}
 		}
-		return sigzero, fmt.Errorf("signal %s is not supported", sig)
+		return sigzero, fmt.Errorf("signal %q is not supported", sig)
 	}
 
 	// gracefully handle all string variants e.g 'sigkill|SIGKILL|kill|KILL'
-	s := strings.TrimPrefix("SIG", strings.ToUpper(sig))
+	s := strings.TrimPrefix(strings.ToUpper(sig), "SIG")
 	signum, exists := signalMap[s]
 	if !exists {
-		return unix.Signal(0), fmt.Errorf("signal %s not supported", sig)
+		return sigzero, fmt.Errorf("signal %q not supported", sig)
 	}
 	return signum, nil
 }
 
 func doKill(ctx *cli.Context) error {
-	signum, err := getSignal(ctx)
+	sig := ctx.Args().Get(1)
+	if len(sig) == 0 {
+		return errors.New("missing signal")
+	}
+
+	signum, err := parseSignal(sig)
 	if err != nil {
 		return errors.Wrap(err, "invalid signal param")
 	}
@@ -107,12 +106,21 @@ func doKill(ctx *cli.Context) error {
 	}
 	log.Info().Int("pid", pid).Int("signal", int(signum)).Msg("sending signal")
 
-	if err := clxc.setConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
-		return err
-	}
-	if err := clxc.Container.Stop(); err != nil {
-		return err
-	}
+	/*
+		if initPid := clxc.Container.InitPid(); initPid > 0 {
+			if err := unix.Kill(initPid, signum); err == nil {
+				return err
+			}
+		}
+	*/
+	/*
+		if err := clxc.setConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
+			return err
+		}
+		if err := clxc.Container.Stop(); err != nil {
+			return err
+		}
+	*/
 
 	// send signal to the monitor process if it still exist
 	if err := unix.Kill(pid, 0); err == nil {
