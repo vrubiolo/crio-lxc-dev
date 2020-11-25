@@ -24,6 +24,8 @@ func fail(err error, msg string, args ...interface{}) {
 func main() {
 	// get rootfs mountpoint from environment
 	rootfs := os.Getenv("LXC_ROOTFS_MOUNT")
+s
+NAME TYPE [MAJOR MINOR]
 	if rootfs == "" {
 		fail(nil, "LXC_ROOTFS_MOUNT environment is not set")
 	}

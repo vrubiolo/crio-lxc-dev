@@ -1,10 +1,8 @@
 package main
 
 import (
-	"time"
-
-	"github.com/lxc/crio-lxc/cmd/internal"
 	"github.com/urfave/cli/v2"
+	"time"
 )
 
 var startCmd = cli.Command{
@@ -34,5 +32,31 @@ func doStart(ctx *cli.Context) error {
 		return err
 	}
 
-	return internal.ReadFifo(clxc.runtimePath(internal.SyncFifoPath), clxc.StartTimeout)
+	return readFifo(clxc.runtimePath(internal.SyncFifoPath), clxc.StartTimeout)
+}
+
+// ReadFifo reads the content from the SyncFifo that was written by #WriteFifo.
+// The read operation is aborted after the given timeout.
+func ReadFifo(fifoPath string, timeout time.Duration) error {
+	// #nosec
+	f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+	if err != nil {
+		return errors.Wrap(err, "failed to open sync fifo")
+	}
+	err = f.SetDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return errors.Wrap(err, "failed to set deadline")
+	}
+	// #nosec
+	defer f.Close()
+
+	data := make([]byte, len(SyncFifoContent))
+	n, err := f.Read(data)
+	if err != nil {
+		return errors.Wrap(err, "problem reading from fifo")
+	}
+	if n != len(SyncFifoContent) || string(data) != SyncFifoContent {
+		return errors.Errorf("bad fifo content: %s", string(data))
+	}
+	return nil
 }

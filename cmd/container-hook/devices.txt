@@ -1,0 +1,2 @@
+/dev/sr0 b 11 0 0755 66:77
+/bar/baz/dev/console1 x 5 1 0755 183:17

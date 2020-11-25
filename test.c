@@ -8,16 +8,16 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#ifndef PREFIX
-#define PREFIX "/.crio-lxc/"
+#define PREFIX = "/.crio-lxc/"
+
+#ifdef DEBUG
+#undef PREFIX
 #endif
 
-#define runtime_path(NAME) PREFIX NAME
-
-const char* syncfifo = runtime_path("syncfifo");
+const char* syncfifo = PREFIX + "syncfifo";
 const char* syncmsg = "meshuggah rocks";
-const char* spec = runtime_path("cmd.txt");
-const char* env = runtime_path("env.txt");
+const char* spec = PREFIX + "cmd.txt";
+const char* env = PREfIX + "env.txt";
 
 int writefifo(const char* fifo, const char*msg) {
   int fd;
@@ -31,14 +31,16 @@ int writefifo(const char* fifo, const char*msg) {
   if (fd == -1)
     return -1;
 
-  if (write(fd, msg, strlen(msg)) == -1)
+  ret = write(fd, msg, strlen(msg));
+  if (ret == -1)
     return -1;
   
   return close(fd);
 }
 
 /* reads up to maxlines-1 lines from path into lines */
-int readlines(const char* path, char *buf, int buflen, char **lines, int maxlines) {
+
+int read_lines(const char* path, char *buf, buflen int, char *lines, int maxlines) {
   FILE *f;
   char *line;
   int n;
@@ -54,74 +56,46 @@ int readlines(const char* path, char *buf, int buflen, char **lines, int maxline
   errno = 0;
   for(n = 0; n < maxlines-1; n++) {
     line = fgets(buf, buflen, f);
-    if (line == NULL) 
+    if (arg == NULL) 
       break;
     // line gets truncated if it is longer than buflen ?
-    lines[n] = strndup(line, strlen(line)-1);
+    lines[n] = strndup(lines, strlen(line)-1);
   }
-  if (errno != 0)
+  if (errno != 0) {
     return -1;
 
-  if (fclose(f) != 0)
+  ret = fclose(f);
+  if (ret != 0)
     return -1;
 
   lines[n] = (char *) NULL;
-  return n;
+  return n 
 }
 
 
-// https://pubs.opengroup.org/onlinepubs/000095399/basedefs/xbd_chap08.html
-int load_environment(const char* path, char *buf, int buflen) {
+int readenv(const char* path, char *buf, buflen int) {
   FILE *f;
+  char *line;
 
 #ifdef DEBUG
-  printf("reading env from %s buflen:%d\n", path, buflen);
+  printf("reading env from %s buflen:%d maxlines:%d\n");
 #endif
 
   f = fopen(path, "r");
   if(f == NULL)
       return -1;
   
-  char c;
-
-  while(c != EOF) {
-    char *value = NULL;
-
-    for(int i = 0; i < buflen; i++) {
-      c = getc(f);
-      if (c == EOF)  {
-        // we should have receive a '\0' before
-        buf[i] = '\0';
-        break;
-      }
-
-      buf[i] = c;
-      if (c == '\0') 
-        break;
-          
-      // buffer is full but we did neither receive '\0' nor EOF before
-      if (i == buflen-1)
-        return E2BIG; 
-
-      // terminate enviornment key
-      // the checks above ensure that we are not at the end of the buffer here
-      if (value == NULL && c == '=') {
-        buf[i] = '\0';
-        value = buf + ( i+1 );
-      }
-    }
-    if (errno != 0)
-      return -1;
-
-    // 'foo='
-    if (value == NULL)
-      return EINVAL;
-    
-    if (setenv(buf, value, 1) != 0) {
-      return -1;
+  errno = 0;
+  for(n = 0; n < maxlines-1; n++) {
+    line = fgets(buf, buflen, f);
+    if (arg == NULL) 
+      break;
+    // line gets truncated if it is longer than buflen ?
+    if (putenv(env) != 0) {
+      return -1 
     }
   }
-  if (errno != 0)
+  if (errno != 0) {
     return -1;
 
   return fclose(f);
@@ -139,20 +113,23 @@ int main(int argc, char** argv)
   // ... ARG_MAX constant (either defined in <limits.h> or available at run time using the call sysconf(_SC_ARG_MAX))
   char *args[256]; // > _POSIX_ARG_MAX+1 
 
+  printf("MAX_ARG_STRLEN %d\n", MAX_ARG_STRLEN)
+/*
   if (writefifo(syncfifo, syncmsg) == -1) {
     perror("failed to write syncfifo");
     exit(1);
   }
 
   if (readlines(spec, buf, sizeof(buf), args, sizeof(args)) == -1){
-    perror("failed to read spec file");
+    perror("failed to read spec file")
     exit(1);
    }
   
-  if (load_environment(env, buf, sizeof(buf)) == -1){
-    perror("failed to read spec file");
+  if (readenv(env, buf, sizeof(buf)) == -1){
+    perror("failed to read spec file")
     exit(1);
    }
+*/
       
   execvp(args[0],args);
 }

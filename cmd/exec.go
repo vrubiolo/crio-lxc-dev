@@ -10,7 +10,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
-	"github.com/lxc/crio-lxc/cmd/internal"
 	lxc "gopkg.in/lxc/go-lxc.v2"
 )
 

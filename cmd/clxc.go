@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lxc/crio-lxc/cmd/internal"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/rs/zerolog"
 	"gopkg.in/lxc/go-lxc.v2"
@@ -27,8 +26,12 @@ const (
 	defaultContainerLogLevel = lxc.WARN
 	defaultLogLevel          = zerolog.WarnLevel
 
-	// crio-lxc-init is started but blocking at the syncfifo
-	envStateCreated = "CRIO_LXC_STATE=" + string(StateCreated)
+	// ConfigDir is the path to the crio-lxc resources relative to the container rootfs.
+	configDir = "/.crio-lxc"
+	// SyncFifoPath is the path to the fifo used to block container start in init until start cmd is called.
+	syncFifoPath = ConfigDir + "/syncfifo"
+	// InitCmd is the path where the init binary is bind mounted.
+	initCmd = ConfigDir + "/init"
 )
 
 // ContainerState represents the state of a container.
@@ -125,7 +128,7 @@ func (c *crioLXC) createPidFile(pid int) error {
 }
 
 func (c *crioLXC) readSpec() (*specs.Spec, error) {
-	return internal.ReadSpec(clxc.runtimePath(internal.InitSpec))
+	return readSpec(clxc.runtimePath(internal.InitSpec))
 }
 
 // loadContainer checks for the existence of the lxc config file.
@@ -287,7 +290,7 @@ func (c *crioLXC) getConfigItem(key string) string {
 func (c *crioLXC) setConfigItem(key, value string) error {
 	err := c.Container.SetConfigItem(key, value)
 	if err != nil {
-		return errors.Wrap(err, "failed to set config item '%s=%s'")
+		return errors.Wrapf(err, "failed to set config item '%s=%s'", key, value)
 	}
 	log.Debug().Str("lxc.config", key).Str("val", value).Msg("set config item")
 	return nil
@@ -421,31 +424,32 @@ func (c *crioLXC) isContainerStopped() bool {
 // The init process environment contains #envStateCreated if the the container
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
-func (c *crioLXC) getContainerState() (int, ContainerState) {
-	if c.isContainerStopped() {
-		return 0, StateStopped
+func (c *crioLXC) getContainerState() (ContainerState, error) {
+	state := c.Container.State()
+	switch state {
+	case lxc.STOPPED:
+		return StateStopped, nil
+	case lxc.STARTING:
+		return StateCreating, nil
 	}
-
+	// RUNNING, STOPPING, ABORTING, FREEZING, FROZEN, THAWED:
 	pid := c.Container.InitPid()
 	if pid < 0 {
-		return 0, StateCreating
+		return StateCreating, nil
 	}
 
-	envFile := fmt.Sprintf("/proc/%d/environ", pid)
-	// #nosec
-	data, err := ioutil.ReadFile(envFile)
+	commPath := fmt.Sprintf("/proc/%d/task/%d/comm", pid)
+	comm, err := ioutil.ReadFile(commPath)
 	if err != nil {
-		// container has died
-		return 0, StateStopped
+		// can not determine state, caller may try again
+		return StateStopped, err
 	}
 
-	environ := strings.Split(string(data), "\000")
-	for _, env := range environ {
-		if env == envStateCreated {
-			return pid, StateCreated
-		}
+	if strings.HasPrefix(c.ContainerID, string(comm)) {
+		return StateCreated, nil
 	}
-	return pid, StateRunning
+
+	return StateRunning, nil
 }
 
 func (c *crioLXC) destroy() error {
