@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -72,7 +73,6 @@ type crioLXC struct {
 	LogLevel          string
 	ContainerLogLevel string
 	SystemdCgroup     bool
-	MonitorCgroup     string
 
 	StartCommand         string
 	InitCommand          string
@@ -101,7 +101,9 @@ type bundleConfig struct {
 	SpecPath      string // BundlePath + "/config.json"
 	PidFile       string
 	ConsoleSocket string
-	//CgroupPath           string
+	MonitorCgroup string
+	// values derived from spec
+	CgroupsPath string
 }
 
 var version string
@@ -123,7 +125,13 @@ func (c *crioLXC) configFilePath() string {
 }
 
 func (c *crioLXC) readPidFile() (int, error) {
-	return readPidFile(c.PidFile)
+	// #nosec
+	data, err := ioutil.ReadFile(c.PidFile)
+	if err != nil {
+		return 0, err
+	}
+	s := strings.TrimSpace(string(data))
+	return strconv.Atoi(s)
 }
 
 func (c *crioLXC) createPidFile(pid int) error {
@@ -147,6 +155,16 @@ func (c *crioLXC) readSpec() (*specs.Spec, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if spec.Linux.CgroupsPath == "" {
+		return nil, fmt.Errorf("empty cgroups path in spec")
+	}
+	if c.SystemdCgroup {
+		c.CgroupsPath = parseSystemdCgroupPath(spec.Linux.CgroupsPath)
+	} else {
+		c.CgroupsPath = spec.Linux.CgroupsPath
+	}
+
 	return spec, nil
 }
 
@@ -200,6 +218,8 @@ func (c *crioLXC) createContainer() error {
 		return errors.Wrap(err, "failed to close empty config file")
 	}
 
+	c.MonitorCgroup = filepath.Join(c.MonitorCgroup, c.ContainerID+".scope")
+
 	if err := c.writeBundleConfig(); err != nil {
 		return err
 	}
@@ -210,6 +230,33 @@ func (c *crioLXC) createContainer() error {
 	}
 	c.Container = container
 	return c.setContainerLogLevel()
+}
+
+func (c *crioLXC) configureCgroupPath() error {
+	if err := clxc.setConfigItem("lxc.cgroup.relative", "0"); err != nil {
+		return err
+	}
+
+	// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
+	// checking for on of the config items shuld be enough, because they were introduced together ...
+	if supportsConfigItem("lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor") {
+		if err := c.setConfigItem("lxc.cgroup.dir.container", c.CgroupsPath); err != nil {
+			return err
+		}
+		if err := c.setConfigItem("lxc.cgroup.dir.monitor", c.MonitorCgroup); err != nil {
+			return err
+		}
+	} else {
+		if err := c.setConfigItem("lxc.cgroup.dir", c.CgroupsPath); err != nil {
+			return err
+		}
+	}
+	if supportsConfigItem("lxc.cgroup.dir.monitor.pivot") {
+		if err := c.setConfigItem("lxc.cgroup.dir.monitor.pivot", c.MonitorCgroup); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *crioLXC) readBundleConfig() error {
@@ -454,15 +501,16 @@ func (c *crioLXC) getContainerState() (ContainerState, error) {
 		return StateCreating, nil
 	}
 
-	commPath := fmt.Sprintf("/proc/%d/task/%d/comm", pid, pid)
-	comm, err := ioutil.ReadFile(commPath)
+	commPath := fmt.Sprintf("/proc/%d/cmdline", pid)
+	cmdline, err := ioutil.ReadFile(commPath)
 	if err != nil {
 		// can not determine state, caller may try again
 		return StateStopped, err
 	}
 
 	// comm contains a trailing newline
-	if strings.TrimSpace(string(comm)) == "init" {
+	initCmdline := fmt.Sprintf("/.crio-lxc/init\000%s\000", c.ContainerID)
+	if string(cmdline) == initCmdline {
 		//if strings.HasPrefix(c.ContainerID, strings.TrimSpace(string(comm))) {
 		return StateCreated, nil
 	}
@@ -470,15 +518,35 @@ func (c *crioLXC) getContainerState() (ContainerState, error) {
 	return StateRunning, nil
 }
 
+func (c *crioLXC) killContainer(signum unix.Signal) error {
+	pid, err := c.readPidFile()
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Wrapf(err, "failed to load pidfile")
+	}
+	log.Info().Int("pid", pid).Int("signal", int(signum)).Msg("sending signal")
+
+	// send signal to the monitor process if it still exist
+	// signals other than SIGTERM are forwarded from liblxc to the container int process
+	if err := unix.Kill(pid, 0); err == nil {
+		err := unix.Kill(pid, signum)
+		// container process has already died
+		if signum == unix.SIGKILL || signum == unix.SIGTERM {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (c *crioLXC) destroy() error {
 	if c.Container != nil {
 		if err := c.Container.Destroy(); err != nil {
 			return errors.Wrap(err, "failed to destroy container")
 		}
-		// required because tryRemoveCgroups retrieves the config item from the container config
-		// --> store the cgroup in the runtime config
-		//c.tryRemoveCgroups()
 	}
+
+	// cgroup directories must be removed if container process was killed with SIGKILL
+	c.tryRemoveCgroups()
 
 	// "Note that resources associated with the container,
 	// but not created by this container, MUST NOT be deleted."
@@ -489,21 +557,10 @@ func (c *crioLXC) destroy() error {
 }
 
 func (c *crioLXC) tryRemoveCgroups() {
-	configItems := []string{"lxc.cgroup.dir", "lxc.cgroup.dir.container", "lxc.cgroup.dir.monitor"}
-	for _, item := range configItems {
-		dir := c.getConfigItem(item)
-		if dir == "" {
-			continue
-		}
-		err := deleteCgroup(dir)
-		if err != nil {
-			log.Warn().Err(err).Str("lxc.config", item).Msg("failed to remove cgroup scope")
-			continue
-		}
-		outerSlice := filepath.Dir(dir)
-		err = deleteCgroup(outerSlice)
-		if err != nil {
-			log.Debug().Err(err).Str("file", outerSlice).Msg("failed to remove cgroup slice")
-		}
+	if err := deleteCgroup(c.CgroupsPath); err != nil {
+		log.Warn().Err(err).Str("cgroup", c.CgroupsPath).Msg("failed to remove cgroup")
+	}
+	if err := deleteCgroup(c.MonitorCgroup); err != nil {
+		log.Warn().Err(err).Str("cgroup", c.MonitorCgroup).Msg("failed to remove monitor cgroup")
 	}
 }

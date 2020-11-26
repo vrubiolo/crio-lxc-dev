@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -100,36 +99,5 @@ func doKill(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to load container")
 	}
 
-	pid, err := clxc.readPidFile()
-	if err != nil && !os.IsNotExist(err) {
-		return errors.Wrapf(err, "failed to load pidfile")
-	}
-	log.Info().Int("pid", pid).Int("signal", int(signum)).Msg("sending signal")
-
-	/*
-		if initPid := clxc.Container.InitPid(); initPid > 0 {
-			if err := unix.Kill(initPid, signum); err == nil {
-				return err
-			}
-		}
-	*/
-	/*
-		if err := clxc.setConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
-			return err
-		}
-		if err := clxc.Container.Stop(); err != nil {
-			return err
-		}
-	*/
-
-	// send signal to the monitor process if it still exist
-	if err := unix.Kill(pid, 0); err == nil {
-		err := unix.Kill(pid, signum)
-		// container process has already died
-		if signum == unix.SIGKILL || signum == unix.SIGTERM {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return clxc.killContainer(signum)
 }

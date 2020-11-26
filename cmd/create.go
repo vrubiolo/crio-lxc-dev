@@ -236,6 +236,10 @@ func configureContainer(spec *specs.Spec) error {
 		return errors.Wrap(err, "failed to add default devices")
 	}
 
+	if err := clxc.configureCgroupPath(); err != nil {
+		return errors.Wrap(err, "failed to configure cgroups path")
+	}
+
 	if err := configureCgroup(spec); err != nil {
 		return errors.Wrap(err, "failed to configure cgroups")
 	}
