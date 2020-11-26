@@ -459,7 +459,7 @@ func (c *crioLXC) executeRuntimeHook(runtimeError error) {
 		"RUNTIME_PATH=" + c.runtimePath(),
 		"BUNDLE_PATH=" + c.BundlePath,
 		"SPEC_PATH=" + c.SpecPath,
-		"LOG_FILE=" + c.LogFilePath(),
+		"LOG_FILE=" + c.LogFilePath,
 	}
 
 	if runtimeError != nil {
