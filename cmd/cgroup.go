@@ -243,7 +243,7 @@ func deleteCgroupContext(ctx context.Context, cgroupPath string) error {
 			}
 			if err == unix.EBUSY {
 				log.Warn().Err(err).Str("cgroup", cgroupPath).Msg("failed to remove cgroup")
-				time.Sleep(time.Millisecond * 50)
+				time.Sleep(time.Millisecond * 100)
 				continue
 			}
 			return err
