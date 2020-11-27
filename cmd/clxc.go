@@ -246,6 +246,12 @@ func (c *crioLXC) configureCgroupPath() error {
 		return err
 	}
 
+	if supportsConfigItem("lxc.cgroup.dir.monitor.pivot") {
+		if err := c.setConfigItem("lxc.cgroup.dir.monitor.pivot", c.MonitorCgroup); err != nil {
+			return err
+		}
+	}
+
 	/*
 		// @since lxc @a900cbaf257c6a7ee9aa73b09c6d3397581d38fb
 		// checking for on of the config items shuld be enough, because they were introduced together ...
@@ -607,10 +613,12 @@ func (c *crioLXC) destroy() error {
 	if err := deleteCgroup(c.CgroupDir); err != nil {
 		log.Warn().Err(err).Str("cgroup", c.CgroupDir).Msg("failed to remove cgroup")
 	}
-	//if err := deleteCgroupWait(c.MonitorCgroupDir, 10*time.Second); err != nil {
-	if err := deleteCgroup(c.MonitorCgroupDir); err != nil {
-		log.Warn().Err(err).Str("cgroup", c.MonitorCgroupDir).Msg("failed to remove monitor cgroup")
-	}
+	/*
+		//if err := deleteCgroupWait(c.MonitorCgroupDir, 10*time.Second); err != nil {
+		if err := deleteCgroup(c.MonitorCgroupDir); err != nil {
+			log.Warn().Err(err).Str("cgroup", c.MonitorCgroupDir).Msg("failed to remove monitor cgroup")
+		}
+	*/
 
 	// "Note that resources associated with the container,
 	// but not created by this container, MUST NOT be deleted."
