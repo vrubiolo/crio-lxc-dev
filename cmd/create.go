@@ -50,6 +50,7 @@ var createCmd = cli.Command{
 			Value:       time.Second * 60,
 			Destination: &clxc.ConsoleSocketTimeout,
 		},
+		// FIXME add missing cmdline args (no_pivot ....
 	},
 }
 
@@ -114,6 +115,28 @@ func doCreateInternal(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to start container process")
 	}
 	log.Info().Int("cpid", startCmd.Process.Pid).Int("pid", os.Getpid()).Int("ppid", os.Getppid()).Msg("started container process")
+
+	/*
+		deadline := time.Now().Add(time.Second * 30)
+		for time.Now().Before(deadline) {
+			state, err := clxc.getContainerState()
+			if err != nil {
+				return err
+			}
+			if state == StateCreated {
+				break
+			}
+			log.Debug().Msg("waiting for container to be created")
+			time.Sleep(time.Millisecond * 50)
+		}
+
+		cg := filepath.Join("/sys/fs/cgroup", filepath.Join(filepath.Dir(clxc.CgroupDir), "cgroup.subtree_control"))
+		err = ioutil.WriteFile(cg, []byte("+cpuset +cpu +io +memory +hugetlb +pids +rdma\n"), 0)
+		if err != nil {
+			return errors.Wrapf(err, "failed to enable controllers in cgroup %s", cg)
+		}
+		// FIXME Exit with the containers exit status https://github.com/opencontainers/runc/blob/fdc48376d1938393b7275e073525264917161a83/create.go#L71
+	*/
 
 	return clxc.createPidFile(startCmd.Process.Pid)
 }

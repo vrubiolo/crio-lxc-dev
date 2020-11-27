@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	//	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -225,6 +225,7 @@ func loadCgroup(cgName string) (*cgroupInfo, error) {
 	return info, nil
 }
 
+/*
 func deleteCgroupWait(cgroupPath string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -243,15 +244,16 @@ func deleteCgroupContext(ctx context.Context, cgroupPath string) error {
 			}
 			if err == unix.EBUSY {
 				log.Warn().Err(err).Str("cgroup", cgroupPath).Msg("failed to remove cgroup")
-				time.Sleep(time.Millisecond * 100)
+				time.Sleep(time.Millisecond * 50)
 				continue
 			}
 			return err
 		}
 	}
 }
+*/
 
-func deleteCgroup(cgroupName string) error {
+func deleteCgroup(cgroupName string, remove bool) error {
 	dirName := filepath.Join("/sys/fs/cgroup", cgroupName)
 	// #nosec
 	dir, err := os.Open(dirName)
@@ -277,9 +279,74 @@ func deleteCgroup(cgroupName string) error {
 			log.Debug().Str("file", fullPath).Msg("removed cgroup dir")
 		}
 	}
-	err = unix.Rmdir(dirName)
-	if err == nil {
-		log.Debug().Str("file", dirName).Msg("removed cgroup dir")
+	if remove {
+		err = unix.Rmdir(dirName)
+		if err == nil {
+			log.Debug().Str("file", dirName).Msg("removed cgroup dir")
+		}
 	}
 	return err
+}
+
+// loopKillCgroupProcs loops over PIDs in cgroup.procs and sends
+// each PID the kill signal until there are no more PIDs left.
+// Looping is required because processes that have been created (forked / exec)
+// may not 'yet' be visible in cgroup.procs.
+func loopKillCgroupProcs(cgroupDir string, sig unix.Signal, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return fmt.Errorf("timeout killing processes")
+		default:
+			nprocs, err := killCgroupProcs(cgroupDir, sig)
+			if err != nil {
+				return err
+			}
+			if nprocs == 0 {
+				return nil
+			}
+			time.Sleep(time.Millisecond * 50)
+		}
+	}
+}
+
+// getCgroupProcs returns the PIDs for all processes which are in the
+// same control group as the process for which the PID is given.
+func killCgroupProcs(cgroupDir string, sig unix.Signal) (int, error) {
+	cgroupProcsPath := filepath.Join("/sys/fs/cgroup", cgroupDir, "cgroup.procs")
+	log.Trace().Str("file", cgroupProcsPath).Msg("reading control group process list")
+	// #nosec
+	procsData, err := ioutil.ReadFile(cgroupProcsPath)
+	if err != nil {
+		return -1, errors.Wrapf(err, "failed to read control group process list %s", cgroupProcsPath)
+	}
+	// cgroup.procs contains one PID per line and is newline separated.
+	// A trailing newline is always present.
+	s := strings.TrimSpace(string(procsData))
+	if s == "" {
+		return 0, nil
+	}
+	pidStrings := strings.Split(s, "\n")
+	numPids := len(pidStrings)
+	if numPids == 0 {
+		return 0, nil
+	}
+
+	// This indicates improper signal handling / termination of the container.
+	log.Warn().Strs("pids", pidStrings).Str("cgroup", cgroupDir).Msg("killing left-over container processes")
+
+	for _, s := range pidStrings {
+		pid, err := strconv.Atoi(s)
+		if err != nil {
+			// Reading garbage from cgroup.procs should not happen.
+			return -1, errors.Wrapf(err, "failed to convert PID %q to number", s)
+		}
+		if err := unix.Kill(pid, sig); err != nil {
+			return -1, errors.Wrapf(err, "failed to kill %d", pid)
+		}
+	}
+
+	return numPids, nil
 }

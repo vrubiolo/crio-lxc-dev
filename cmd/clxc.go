@@ -156,7 +156,6 @@ func (c *crioLXC) readSpec() (*specs.Spec, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return spec, nil
 }
 
@@ -218,7 +217,6 @@ func (c *crioLXC) createContainer(spec *specs.Spec) error {
 	} else {
 		c.CgroupDir = spec.Linux.CgroupsPath
 	}
-
 	c.MonitorCgroupDir = filepath.Join(c.MonitorCgroup, c.ContainerID+".scope")
 
 	if err := c.writeBundleConfig(); err != nil {
@@ -538,6 +536,11 @@ func (c *crioLXC) killContainer(signum unix.Signal) error {
 		}
 		return err
 	}
+	if signum == unix.SIGKILL {
+		if err := loopKillCgroupProcs(c.CgroupDir, unix.SIGKILL, 10*time.Second); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -552,11 +555,13 @@ func (c *crioLXC) destroy() error {
 	// kubernetes will show the container as 'Terminated' until the cgroup is removed.
 	// Cgroups may exist if container process was killed with SIGKILL and could not cleanup cgroups itself.
 	//if err := deleteCgroupWait(c.CgroupDir, 10*time.Second); err != nil {
-	if err := deleteCgroup(c.CgroupDir); err != nil {
-		log.Warn().Err(err).Str("cgroup", c.CgroupDir).Msg("failed to remove cgroup")
-	}
-	//if err := deleteCgroupWait(c.MonitorCgroupDir, 10*time.Second); err != nil {
-	if err := deleteCgroup(c.MonitorCgroupDir); err != nil {
+	/*
+		if err := deleteCgroup(c.CgroupDir, true); err != nil {
+			log.Warn().Err(err).Str("cgroup", c.CgroupDir).Msg("failed to remove cgroup")
+		}
+	*/
+
+	if err := deleteCgroup(c.MonitorCgroupDir, true); err != nil {
 		log.Warn().Err(err).Str("cgroup", c.MonitorCgroupDir).Msg("failed to remove monitor cgroup")
 	}
 
