@@ -586,14 +586,16 @@ func (c *crioLXC) killContainer(signum unix.Signal) error {
 	}
 	log.Info().Int("pid", pid).Int("signal", int(signum)).Msg("sending signal")
 
-	if err := c.setConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
-		return err
-	}
-	if err := c.Container.Stop(); err != nil {
-		return err
-	}
-	if !c.Container.Wait(lxc.STOPPED, time.Second*10) {
-		log.Warn().Msg("failed to stop lxc container - sending kill")
+	if signum == unix.SIGKILL || signum == unix.SIGTERM {
+		if err := c.setConfigItem("lxc.signal.stop", strconv.Itoa(int(signum))); err != nil {
+			return err
+		}
+		if err := c.Container.Stop(); err != nil {
+			return err
+		}
+		if !c.Container.Wait(lxc.STOPPED, time.Second*10) {
+			log.Warn().Msg("failed to stop lxc container - sending kill")
+		}
 	}
 
 	// TODO wait for the monitor process to die ?
@@ -621,9 +623,12 @@ func (c *crioLXC) destroy() error {
 		}
 	}
 
+	start := time.Now()
 	err := drainCgroup(c.CgroupDir, unix.SIGKILL, time.Second*10)
 	if err != nil && !os.IsNotExist(err) {
 		log.Warn().Err(err).Str("file", c.CgroupDir).Msg("failed to drain cgroup")
+	} else {
+		log.Info().Dur("duration", time.Since(start)).Str("file", c.CgroupDir).Msg("cgroup drained")
 	}
 
 	err = deleteCgroup(c.CgroupDir)
