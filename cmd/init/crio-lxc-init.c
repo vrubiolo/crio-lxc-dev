@@ -23,10 +23,6 @@ const char* environ_path = runtime_path("environ");
 int writefifo(const char* fifo, const char*msg) {
   int fd;
 
-#ifdef DEBUG
-  printf("writing fifo %s\n", fifo);
-#endif
-
   // Open FIFO for write only 
   fd = open(fifo, O_WRONLY | O_CLOEXEC); 
   if (fd == -1)
@@ -40,135 +36,102 @@ int writefifo(const char* fifo, const char*msg) {
 
 /* reads up to maxlines-1 lines from path into lines */
 int load_cmdline(const char* path, char *buf, int buflen, char **lines, int maxlines) {
+  int fd;
   FILE *f;
-  int n;
 
-#ifdef DEBUG
-  printf("reading lines from %s buflen:%d maxlines:%d\n", path, buflen, maxlines);
-#endif
+  fd = open(path, O_RDONLY | O_CLOEXEC);
+  if ( fd == -1)
+    return -20;
 
-  // FIXME open file with O_CLOEXEC
-
-  f = fopen(path, "r");
+  f = fdopen(fd, "r");
   if(f == NULL)
-      return -1;
+    return -21;
   
-  for(n = 0; n < maxlines-1; n++) {
+  for(int n = 0; n < maxlines-1; n++) {
     char c;
     int i;
+    // read until next '\0' or EOF
     for(i = 0; i < buflen; i++) {
       c = getc(f);
-      if (c == EOF)  {
-        // we should have receive a '\0' before
-        buf[i] = '\0';
+      if (c == EOF) {
         break;
       }
-
       buf[i] = c;
       if (c == '\0') 
         break;
     }
+    
+    if (errno != 0) // getc failed 
+      return -22;
 
-    if (errno != 0) {
-      errno = 21 ;
-      goto out;
+    if (c == EOF) {
+      if (i > 0) // trailing garbage
+        return -23; 
+      lines[n] = (char *) NULL;
+      break;
     }
 
-    if (i > 0)
-      lines[n] = strndup(buf, buflen-1);
-
-    if (c == EOF)
-      break;
+    lines[n] = strndup(buf, i);
+    if (errno != 0) // strndup failed
+      return -24;
   }
-
-out:
-  lines[n] = (char *) NULL;
-  fclose(f);
-  return (errno != 0) ? errno : 0;
+  return 0;
 }
 
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html#tag_08_01
 int load_environment(const char* path, char *buf, int buflen) {
+  int fd;
   FILE *f;
 
-#ifdef DEBUG
-  printf("reading env from %s buflen:%d\n", path, buflen);
-#endif
+  fd = open(path, O_RDONLY | O_CLOEXEC);
+  if ( fd == -1)
+    return -30;
 
   f = fopen(path, "r");
   if(f == NULL)
-      return -1;
+      return -31;
   
-  char c;
-
-  while(c != EOF) {
-    char *value = NULL;
-
-    for(int i = 0; i < buflen; i++) {
+  for(;;) {
+    char *key = NULL;
+    char c;
+    int i;
+    // read until next '\0' or EOF
+    for(i = 0; i < buflen; i++) {
       c = getc(f);
-      if (c == EOF)  {
-        // we should have receive a '\0' before
-        buf[i] = '\0';
+      if (c == EOF) {
         break;
       }
-
       buf[i] = c;
       if (c == '\0') 
         break;
-          
-      // buffer is full but we did neither receive '\0' nor EOF before
-      if (i == buflen-1) {
-        //errno = E2BIG; 
-        errno = 31;
-        goto out;
-      }
 
-      // terminate enviornment key
-      // the checks above ensure that we are not at the end of the buffer here
-      if (value == NULL && c == '=') {
+      // split at first '='
+      if (key == NULL && c == '=') {
         buf[i] = '\0';
-        value = buf + ( i+1 );
+        key = buf;
       }
     }
-    if (errno != 0) {
-      errno = 32;
-      goto out;
+
+    if (errno != 0) // getc failed 
+      return -32;
+
+    if (c == EOF) {
+      if (i > 0) // trailing garbage
+        return -33; 
+      break;
     }
 
-    // 'foo='
-    if (value == NULL) {
-      errno = 33;
-      errno = EINVAL;
-      goto out;
-    }
-#ifdef DEBUG    
-    printf("setenv %s\n", buf);
-#endif
-    if (setenv(buf, value, 1) == -1)
-      goto out;
-  }
+    // malformed variable 
+    // e.g 'fooo\0' or 'fooo=\0'
+    if (key == NULL || i == strlen(key))
+       return -34;
 
-out:
-  fclose(f);
-  return (errno != 0) ? errno : 0;
-}
+    if (setenv(key, buf + i, 0) == -1)
+      return -35;
+   }
+  return 0;
 
-int sethome() {
-  struct passwd *pw;
-
-  if (getenv("HOME") != NULL) {
-    return 0;
-  }
-  pw = getpwuid(geteuid());
-  if (pw != NULL) {
-   if (pw->pw_dir != NULL)
-     return setenv("HOME",  pw->pw_dir, 0);
-  }
-  // This is best effort so we ignore the errno set by getpwuid.
-  if (errno != 0)
-    errno = 0;
-  return setenv("HOME", "/", 0);
 }
 
 int main(int argc, char** argv)
@@ -184,35 +147,41 @@ int main(int argc, char** argv)
 
   const char* cid;
 
+  int ret;
+
   if (argc != 2) {
     fprintf(stderr, "invalid number of arguments (expected 2 was %d) usage: %s <containerID>\n", argc, argv[0]);
     exit(1);
   }
    cid = argv[1];
-
-  if (load_cmdline(cmdline_path, buf, sizeof(buf), args, sizeof(args)) == -1){
-    fprintf(stderr, "failed to read cmdline file %s: %s\n", cmdline_path, strerror(errno));
-    exit(2);
-   }
   
-  // environment is already cleared by liblxc
+   // environment is already cleared by liblxc
   //environ = NULL;
-  if (load_environment(environ_path, buf, sizeof(buf)) == -1){
-    fprintf(stderr, "failed to read environment file %s: %s\n", environ_path, strerror(errno));
-    if (errno == 0)
-      exit(3);
-    else 
-      exit(errno);
-   }
+  ret = load_environment(environ_path, buf, sizeof(buf));
+  if (ret != 0) { 
+    if (errno != 0)
+      fprintf(stderr, "error reading environment file %s: %s\n", environ_path, strerror(errno));
+    exit(ret);
+  }
   
-  if (sethome() == -1) {
-    perror("failed to set HOME");
-    exit(4);
+  ret = load_cmdline(cmdline_path, buf, sizeof(buf), args, sizeof(args));
+  if (ret != 0) {
+    if (errno != 0)
+      fprintf(stderr, "error reading cmdline file %s: %s\n", environ_path, strerror(errno));
+    exit(ret);
+   }
+
+  if (getenv("HOME") == NULL) {
+    struct passwd *pw;
+    pw = getpwuid(geteuid());
+    if (pw != NULL && pw->pw_dir != NULL)
+      setenv("HOME",  pw->pw_dir, 0);
+     errno = 0; // clear errno, this is best effort
   }
 
   if (writefifo(syncfifo, cid) == -1) {
     perror("failed to write syncfifo");
-    exit(5);
+    exit(-3);
   }
       
   execvp(args[0],args);
