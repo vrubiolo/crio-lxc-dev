@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -92,16 +91,6 @@ func doCreateInternal(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	uid := int(spec.Process.User.UID)
-	gid := int(spec.Process.User.GID)
-
-	if err := writeInitList(clxc.runtimePath("/.crio-lxc/cmdline.txt"), spec.Process.Args, uid, gid); err != nil {
-		return err
-	}
-	if err := writeInitList(clxc.runtimePath("/.crio-lxc/environ"), spec.Process.Env, uid, gid); err != nil {
-		return err
-	}
-
 	// #nosec
 	startCmd := exec.Command(clxc.StartCommand, clxc.Container.Name(), clxc.RuntimeRoot, clxc.configFilePath())
 	if err := runStartCmd(startCmd, spec); err != nil {
@@ -116,36 +105,16 @@ func doCreateInternal(ctx *cli.Context) error {
 	return clxc.createPidFile(startCmd.Process.Pid)
 }
 
-func writeInitList(dst string, entries []string, uid, gid int) error {
-	// #nosec
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create init list %s", dst)
-	}
-
-	for _, arg := range entries {
-		_, err := f.WriteString(arg)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		_, err = f.Write([]byte{'\000'})
-		if err != nil {
-			f.Close()
-			return err
-		}
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := unix.Chown(envFile, uid, gid); err != nil {
-		return err
-	}
-	return unix.Chmod(envFile, 0400)
-}
-
 func configureContainer(spec *specs.Spec) error {
 	if err := configureRootfs(spec); err != nil {
+		return err
+	}
+
+	// pass context information as environment variables to hook scripts
+	if err := clxc.setConfigItem("lxc.hook.version", "1"); err != nil {
+		return err
+	}
+	if err := clxc.setConfigItem("lxc.hook.mount", clxc.ContainerHook); err != nil {
 		return err
 	}
 
@@ -199,38 +168,6 @@ func configureContainer(spec *specs.Spec) error {
 		}
 	} else {
 		log.Warn().Msg("capabilities are disabled")
-	}
-
-	// TODO extract all uid/gid related settings into separate function configureUserAndGroups
-	if err := clxc.setConfigItem("lxc.init.uid", fmt.Sprintf("%d", spec.Process.User.UID)); err != nil {
-		return err
-	}
-	if err := clxc.setConfigItem("lxc.init.gid", fmt.Sprintf("%d", spec.Process.User.GID)); err != nil {
-		return err
-	}
-
-	// TODO ensure that the user namespace is enabled
-	// See `man lxc.container.conf` lxc.idmap.
-	for _, m := range spec.Linux.UIDMappings {
-		if err := clxc.setConfigItem("lxc.idmap", fmt.Sprintf("u %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-			return err
-		}
-	}
-
-	for _, m := range spec.Linux.GIDMappings {
-		if err := clxc.setConfigItem("lxc.idmap", fmt.Sprintf("g %d %d %d", m.ContainerID, m.HostID, m.Size)); err != nil {
-			return err
-		}
-	}
-
-	if len(spec.Process.User.AdditionalGids) > 0 && supportsConfigItem("lxc.init.groups") {
-		a := make([]string, 0, len(spec.Process.User.AdditionalGids))
-		for _, gid := range spec.Process.User.AdditionalGids {
-			a = append(a, strconv.FormatUint(uint64(gid), 10))
-		}
-		if err := clxc.setConfigItem("lxc.init.groups", strings.Join(a, " ")); err != nil {
-			return err
-		}
 	}
 
 	if err := setHostname(spec); err != nil {
@@ -291,65 +228,6 @@ func configureRootfs(spec *specs.Spec) error {
 	return nil
 }
 
-func configureInit(spec *specs.Spec) error {
-	err := os.MkdirAll(filepath.Join(spec.Root.Path, configDir), 0)
-	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in rootfs", configDir)
-	}
-	// #nosec
-	err = os.MkdirAll(clxc.runtimePath(configDir), 0755)
-	if err != nil {
-		return errors.Wrapf(err, "Failed creating %s in lxc container dir", configDir)
-	}
-
-	// create named fifo in lxcpath and mount it into the container
-	if err := makeSyncFifo(clxc.runtimePath(syncFifoPath)); err != nil {
-		return errors.Wrapf(err, "failed to make sync fifo")
-	}
-
-	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.runtimePath(configDir),
-		Destination: strings.Trim(configDir, "/"),
-		Type:        "bind",
-		Options:     []string{"bind", "ro", "nodev", "nosuid"},
-	})
-
-	// pass context information as environment variables to hook scripts
-	if err := clxc.setConfigItem("lxc.hook.version", "1"); err != nil {
-		return err
-	}
-	if err := clxc.setConfigItem("lxc.hook.mount", clxc.ContainerHook); err != nil {
-		return err
-	}
-
-	if err := clxc.setConfigItem("lxc.init.cwd", spec.Process.Cwd); err != nil {
-		return err
-	}
-
-	// create destination file for bind mount
-	initBin := clxc.runtimePath(initCmd)
-	err = touchFile(initBin, 0)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create %s", initBin)
-	}
-	spec.Mounts = append(spec.Mounts, specs.Mount{
-		Source:      clxc.InitCommand,
-		Destination: initCmd,
-		Type:        "bind",
-		Options:     []string{"bind", "ro", "nosuid"},
-	})
-	return clxc.setConfigItem("lxc.init.cmd", initCmd+" "+clxc.ContainerID)
-}
-
-func touchFile(filePath string, perm os.FileMode) error {
-	// #nosec
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDONLY, perm)
-	if err == nil {
-		return f.Close()
-	}
-	return err
-}
-
 func configureReadonlyPaths(spec *specs.Spec) error {
 	rootmnt := clxc.getConfigItem("lxc.rootfs.mount")
 	if rootmnt == "" {
@@ -361,19 +239,6 @@ func configureReadonlyPaths(spec *specs.Spec) error {
 			return errors.Wrap(err, "failed to make path readonly")
 		}
 	}
-	return nil
-}
-
-func makeSyncFifo(fifoFilename string) error {
-	prevMask := unix.Umask(0000)
-	defer unix.Umask(prevMask)
-	if err := unix.Mkfifo(fifoFilename, 0666); err != nil {
-		return errors.Wrapf(err, "failed to make fifo '%s'", fifoFilename)
-	}
-	return nil
-}
-
-func configureContainerSecurity(c *lxc.Container, spec *specs.Spec) error {
 	return nil
 }
 

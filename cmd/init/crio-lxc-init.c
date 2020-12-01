@@ -10,15 +10,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#ifndef PREFIX
-#define PREFIX "/.crio-lxc/"
-#endif
-
-#define runtime_path(NAME) PREFIX NAME
-
-const char *syncfifo = runtime_path("syncfifo");
-const char *cmdline_path = runtime_path("cmdline.txt");
-const char *environ_path = runtime_path("environ");
+const char *syncfifo_path = "syncfifo";
+const char *cmdline_path = "cmdline";
+const char *environ_path = "environ";
 
 int writefifo(const char *fifo, const char *msg)
 {
@@ -40,14 +34,15 @@ int load_cmdline(const char *path, char *buf, int buflen, char **lines, int maxl
 {
 	int fd;
 	FILE *f;
+	int n = 0;
 
 	fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd == -1)
-		return -20;
+		return 200;
 
 	f = fdopen(fd, "r");
 	if (f == NULL)
-		return -21;
+		return 201;
 
 	for (int n = 0; n < maxlines - 1; n++) {
 		char c;
@@ -64,19 +59,23 @@ int load_cmdline(const char *path, char *buf, int buflen, char **lines, int maxl
 		}
 
 		if (errno != 0) // getc failed
-			return -22;
+			return 202;
 
 		if (c == EOF) {
 			if (i > 0) // trailing garbage
-				return -23;
+				return 203;
 			lines[n] = (char *)NULL;
 			break;
 		}
 
 		lines[n] = strndup(buf, i);
 		if (errno != 0) // strndup failed
-			return -24;
+			return 204;
 	}
+	// empty cmdline
+	if (n < 1)
+		return 205;
+
 	return 0;
 }
 
@@ -88,11 +87,11 @@ int load_environment(const char *path, char *buf, int buflen)
 
 	fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd == -1)
-		return -30;
+		return 210;
 
 	f = fopen(path, "r");
 	if (f == NULL)
-		return -31;
+		return 211;
 
 	for (;;) {
 		char *key = NULL;
@@ -116,21 +115,21 @@ int load_environment(const char *path, char *buf, int buflen)
 		}
 
 		if (errno != 0) // getc failed
-			return -32;
+			return 212;
 
 		if (c == EOF) {
 			if (i > 0) // trailing garbage
-				return -33;
+				return 213;
 			break;
 		}
 
 		// malformed variable
 		// e.g 'fooo\0' or 'fooo=\0'
 		if (key == NULL || i == strlen(key))
-			return -34;
+			return 214; 
 
 		if (setenv(key, buf + i, 0) == -1)
-			return -35;
+			return 215;
 	}
 	return 0;
 }
@@ -150,7 +149,7 @@ int main(int argc, char **argv)
 
 	const char *cid;
 
-	int ret;
+	int ret = 0;
 
 	if (argc != 2) {
 		fprintf(stderr, "invalid number of arguments %d\n", argc);
@@ -164,7 +163,7 @@ int main(int argc, char **argv)
 	ret = load_environment(environ_path, buf, sizeof(buf));
 	if (ret != 0) {
 		if (errno != 0)
-			fprintf(stderr, "error reading environment file %s: %s\n",
+			fprintf(stderr, "error reading environment file \"%s\": %s\n",
 				environ_path, strerror(errno));
 		exit(ret);
 	}
@@ -172,8 +171,8 @@ int main(int argc, char **argv)
 	ret = load_cmdline(cmdline_path, buf, sizeof(buf), args, sizeof(args));
 	if (ret != 0) {
 		if (errno != 0)
-			fprintf(stderr, "error reading cmdline file %s: %s\n",
-				environ_path, strerror(errno));
+			fprintf(stderr, "error reading cmdline file \"%s\": %s\n",
+				cmdline_path, strerror(errno));
 		exit(ret);
 	}
 
@@ -185,10 +184,17 @@ int main(int argc, char **argv)
 		errno = 0; // clear errno, this is best effort
 	}
 
-	if (writefifo(syncfifo, cid) == -1) {
+
+  // TODO use fd 4 for sync fifo ?
+  // --> check whether liblxc passes file descriptors to container init
+	if (writefifo(syncfifo_path, cid) == -1) {
 		perror("failed to write syncfifo");
-		exit(-4);
+		exit(220);
 	}
 
+  if (chdir("cwd") == -1) {
+		perror("failed to change working directory");
+    exit(221);
+  }
 	execvp(args[0], args);
 }
