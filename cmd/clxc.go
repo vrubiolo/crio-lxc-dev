@@ -501,41 +501,56 @@ func (c *crioLXC) isContainerStopped() bool {
 	return c.Container.State() == lxc.STOPPED
 }
 
+func (c *crioLXC) waitCreated(timeout time.Duration) error {
+	state := c.Container.State()
+	switch state {
+	case lxc.STARTING:
+		if !c.Container.Wait(lxc.RUNNING, timeout) {
+			return fmt.Errorf("timeout starting init cmd")
+		}
+	case lxc.RUNNING:
+		// container is already running
+	default:
+		// fail fast
+		return fmt.Errorf("expected state to be lxc.STARTING or lxc.RUNNING")
+	}
+
+	initState, err := c.getContainerInitState()
+	if err != nil {
+		return err
+	}
+	if initState != StateCreated {
+		return fmt.Errorf("unexpected init state %q", initState)
+	}
+	return nil
+}
+
 // getContainerInitState returns the runtime state of the container.
 // It is used to determine whether the container state is 'created' or 'running'.
 // The init process environment contains #envStateCreated if the the container
 // is created, but not yet running/started.
 // This requires the proc filesystem to be mounted on the host.
 func (c *crioLXC) getContainerState() (ContainerState, error) {
-	// read pid file ?
-	/*
-		state := c.Container.State()
-		switch state {
-		case lxc.STOPPED:
-			return StateStopped, nil
-		case lxc.STARTING:
-			return StateCreating, nil
-		}
-	*/
-	pid, err := c.readPidFile()
-	if os.IsNotExist(err) {
+	state := c.Container.State()
+	switch state {
+	case lxc.STOPPED:
 		return StateStopped, nil
-	}
-	if err != nil {
-		return StateStopped, err
-	}
-
-	if err := unix.Kill(pid, 0); err != nil {
-		// return nil if err == unix.ERSCH ?
-		return StateStopped, err
-
-	}
-	// RUNNING, STOPPING, ABORTING, FREEZING, FROZEN, THAWED:
-	initPid := c.Container.InitPid()
-	if initPid < 0 {
+	case lxc.STARTING:
 		return StateCreating, nil
+	case lxc.RUNNING, lxc.STOPPING, lxc.ABORTING, lxc.FREEZING, lxc.FROZEN, lxc.THAWED:
+		return c.getContainerInitState()
+	default:
+		return StateStopped, fmt.Errorf("unsupported lxc container state %q", state)
 	}
+}
 
+// getContainerInitState returns the detailed state of the container init process.
+// If the init process is not running StateStopped is returned along with an error.
+func (c *crioLXC) getContainerInitState() (ContainerState, error) {
+	initPid := c.Container.InitPid()
+	if initPid < 1 {
+		return StateStopped, fmt.Errorf("init cmd is not running")
+	}
 	commPath := fmt.Sprintf("/proc/%d/cmdline", initPid)
 	cmdline, err := ioutil.ReadFile(commPath)
 	if err != nil {
@@ -549,7 +564,6 @@ func (c *crioLXC) getContainerState() (ContainerState, error) {
 		//if strings.HasPrefix(c.ContainerID, strings.TrimSpace(string(comm))) {
 		return StateCreated, nil
 	}
-
 	return StateRunning, nil
 }
 

@@ -109,6 +109,10 @@ func doCreateInternal(ctx *cli.Context) error {
 	}
 	log.Info().Int("cpid", startCmd.Process.Pid).Int("pid", os.Getpid()).Int("ppid", os.Getppid()).Msg("started container process")
 
+	if err := clxc.waitCreated(time.Second * 10); err != nil {
+		return err
+	}
+
 	return clxc.createPidFile(startCmd.Process.Pid)
 }
 
