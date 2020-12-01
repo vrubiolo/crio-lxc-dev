@@ -400,6 +400,7 @@ func (c *crioLXC) configureLogging() error {
 	// NOTE Unfortunately it's not possible change the possition of the timestamp.
 	// The ttimestamp is appended to the to the log output because it is dynamically rendered
 	// see https://github.com/rs/zerolog/issues/109
+	//log = zerolog.New(c.LogFile).With().Timestamp().CallerWithSkipFrameCount(-1).
 	log = zerolog.New(c.LogFile).With().Timestamp().Caller().
 		Str("cmd", c.Command).Str("cid", c.ContainerID).Logger()
 
@@ -483,7 +484,7 @@ func (c *crioLXC) executeRuntimeHook(runtimeError error) {
 	// #nosec
 	cmd := exec.CommandContext(ctx, c.RuntimeHook)
 	cmd.Env = env
-	cmd.Dir = "/"
+	cmd.Dir = c.runtimePath()
 	if err := cmd.Run(); err != nil {
 		log.Error().Err(err).Str("file", c.RuntimeHook).
 			Bool("timeout-expired", ctx.Err() == context.DeadlineExceeded).Msg("runtime hook failed")
@@ -495,17 +496,8 @@ func (c *crioLXC) isContainerStopped() bool {
 }
 
 func (c *crioLXC) waitCreated(timeout time.Duration) error {
-	state := c.Container.State()
-	switch state {
-	case lxc.STARTING:
-		if !c.Container.Wait(lxc.RUNNING, timeout) {
-			return fmt.Errorf("timeout starting init cmd")
-		}
-	case lxc.RUNNING:
-		// container is already running
-	default:
-		// fail fast
-		return fmt.Errorf("expected state to be lxc.STARTING or lxc.RUNNING")
+	if !c.Container.Wait(lxc.RUNNING, timeout) {
+		return fmt.Errorf("timeout starting init cmd")
 	}
 
 	initState, err := c.getContainerInitState()
@@ -516,6 +508,25 @@ func (c *crioLXC) waitCreated(timeout time.Duration) error {
 		return fmt.Errorf("unexpected init state %q", initState)
 	}
 	return nil
+}
+
+func (c *crioLXC) waitRunning(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		initState, err := c.getContainerInitState()
+		if err != nil {
+			return err
+		}
+		if initState == StateRunning {
+			return nil
+		}
+		if initState == StateCreated {
+			time.Sleep(time.Millisecond * 10)
+			continue
+		}
+		return fmt.Errorf("unexpected init state %q", initState)
+	}
+	return fmt.Errorf("timeout")
 }
 
 // getContainerInitState returns the runtime state of the container.

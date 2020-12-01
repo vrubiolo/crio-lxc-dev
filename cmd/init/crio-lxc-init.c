@@ -44,7 +44,7 @@ int load_cmdline(const char *path, char *buf, int buflen, char **lines, int maxl
 	if (f == NULL)
 		return 201;
 
-	for (int n = 0; n < maxlines - 1; n++) {
+	for (n = 0; n < maxlines - 1; n++) {
 		char c;
 		int i;
 		// read until next '\0' or EOF
@@ -126,12 +126,29 @@ int load_environment(const char *path, char *buf, int buflen)
 		// malformed variable
 		// e.g 'fooo\0' or 'fooo=\0'
 		if (key == NULL || i == strlen(key))
-			return 214; 
+			return 214;
 
-		if (setenv(key, buf + i, 0) == -1)
+		if (setenv(key, buf + strlen(key) + 1, 0) == -1)
 			return 215;
 	}
 	return 0;
+}
+
+void try_setenv_HOME()
+{
+	struct passwd *pw;
+
+	if (getenv("HOME") != NULL)
+		return;
+
+	pw = getpwuid(geteuid());
+	if (pw != NULL && pw->pw_dir != NULL)
+		setenv("HOME", pw->pw_dir, 0);
+	else
+		setenv("HOME", "/", 0);
+
+	// ignore errors
+	errno = 0;
 }
 
 int main(int argc, char **argv)
@@ -153,7 +170,7 @@ int main(int argc, char **argv)
 
 	if (argc != 2) {
 		fprintf(stderr, "invalid number of arguments %d\n", argc);
-    fprintf(stderr, "usage: %s <containerID>\n", argv[0]);
+		fprintf(stderr, "usage: %s <containerID>\n", argv[0]);
 		exit(-1);
 	}
 	cid = argv[1];
@@ -176,25 +193,16 @@ int main(int argc, char **argv)
 		exit(ret);
 	}
 
-	if (getenv("HOME") == NULL) {
-		struct passwd *pw;
-		pw = getpwuid(geteuid());
-		if (pw != NULL && pw->pw_dir != NULL)
-			setenv("HOME", pw->pw_dir, 0);
-		errno = 0; // clear errno, this is best effort
-	}
+	try_setenv_HOME();
 
-
-  // TODO use fd 4 for sync fifo ?
-  // --> check whether liblxc passes file descriptors to container init
 	if (writefifo(syncfifo_path, cid) == -1) {
 		perror("failed to write syncfifo");
 		exit(220);
 	}
 
-  if (chdir("cwd") == -1) {
+	if (chdir("cwd") == -1) {
 		perror("failed to change working directory");
-    exit(221);
-  }
+		exit(221);
+	}
 	execvp(args[0], args);
 }
