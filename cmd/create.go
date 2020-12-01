@@ -92,11 +92,13 @@ func doCreateInternal(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to configure container")
 	}
 
-	if err := writeCmdline(clxc.runtimePath("/.crio-lxc/cmdline.txt"), spec); err != nil {
+	uid := int(spec.Process.User.UID)
+	gid := int(spec.Process.User.GID)
+
+	if err := writeInitList(clxc.runtimePath("/.crio-lxc/cmdline.txt"), spec.Process.Args, uid, gid); err != nil {
 		return err
 	}
-
-	if err := writeEnviron(clxc.runtimePath("/.crio-lxc/environ"), spec); err != nil {
+	if err := writeInitList(clxc.runtimePath("/.crio-lxc/environ"), spec.Process.Env, uid, gid); err != nil {
 		return err
 	}
 
@@ -110,32 +112,14 @@ func doCreateInternal(ctx *cli.Context) error {
 	return clxc.createPidFile(startCmd.Process.Pid)
 }
 
-func writeCmdline(cmdFile string, spec *specs.Spec) error {
+func writeInitList(dst string, entries []string, uid, gid int) error {
 	// #nosec
-	f, err := os.OpenFile(cmdFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return errors.Wrap(err, "failed to create the cmd file")
-	}
-	for _, arg := range spec.Process.Args {
-		fmt.Fprintln(f, arg)
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := unix.Chown(cmdFile, int(spec.Process.User.UID), int(spec.Process.User.GID)); err != nil {
-		return err
-	}
-	return unix.Chmod(cmdFile, 0400)
-}
-
-func writeEnviron(envFile string, spec *specs.Spec) error {
-	// #nosec
-	f, err := os.OpenFile(envFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to create init list %s", dst)
 	}
 
-	for _, arg := range spec.Process.Env {
+	for _, arg := range entries {
 		_, err := f.WriteString(arg)
 		if err != nil {
 			f.Close()
@@ -150,7 +134,7 @@ func writeEnviron(envFile string, spec *specs.Spec) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := unix.Chown(envFile, int(spec.Process.User.UID), int(spec.Process.User.GID)); err != nil {
+	if err := unix.Chown(envFile, uid, gid); err != nil {
 		return err
 	}
 	return unix.Chmod(envFile, 0400)

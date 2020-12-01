@@ -39,9 +39,8 @@ int writefifo(const char* fifo, const char*msg) {
 }
 
 /* reads up to maxlines-1 lines from path into lines */
-int readlines(const char* path, char *buf, int buflen, char **lines, int maxlines) {
+int load_cmdline(const char* path, char *buf, int buflen, char **lines, int maxlines) {
   FILE *f;
-  char *line;
   int n;
 
 #ifdef DEBUG
@@ -54,23 +53,38 @@ int readlines(const char* path, char *buf, int buflen, char **lines, int maxline
   if(f == NULL)
       return -1;
   
-  errno = 0;
   for(n = 0; n < maxlines-1; n++) {
-    // https://pubs.opengroup.org/onlinepubs/009696699/functions/fgets.html
-    line = fgets(buf, buflen, f);
-    if (line == NULL) 
+    char c;
+    int i;
+    for(i = 0; i < buflen; i++) {
+      c = getc(f);
+      if (c == EOF)  {
+        // we should have receive a '\0' before
+        buf[i] = '\0';
+        break;
+      }
+
+      buf[i] = c;
+      if (c == '\0') 
+        break;
+    }
+
+    if (errno != 0) {
+      errno = 21 ;
+      goto out;
+    }
+
+    if (i > 0)
+      lines[n] = strndup(buf, buflen-1);
+
+    if (c == EOF)
       break;
-    // line gets truncated if it is longer than buflen ?
-    lines[n] = strndup(line, strlen(line)-1);
   }
-  if (errno != 0)
-    return -1;
 
-  if (fclose(f) != 0)
-    return -1;
-
+out:
   lines[n] = (char *) NULL;
-  return n;
+  fclose(f);
+  return (errno != 0) ? errno : 0;
 }
 
 
@@ -176,15 +190,15 @@ int main(int argc, char** argv)
   }
    cid = argv[1];
 
-  if (readlines(cmdline_path, buf, sizeof(buf), args, sizeof(args)) == -1){
-    perror("failed to read cmdline file");
+  if (load_cmdline(cmdline_path, buf, sizeof(buf), args, sizeof(args)) == -1){
+    fprintf(stderr, "failed to read cmdline file %s: %s\n", cmdline_path, strerror(errno));
     exit(2);
    }
   
   // environment is already cleared by liblxc
   //environ = NULL;
   if (load_environment(environ_path, buf, sizeof(buf)) == -1){
-    perror("failed to read environment file");
+    fprintf(stderr, "failed to read environment file %s: %s\n", environ_path, strerror(errno));
     if (errno == 0)
       exit(3);
     else 
