@@ -760,10 +760,11 @@ func ReadSpec(src string) (spec *specs.Spec, err error) {
 	return
 }
 
-func ReadSpecProcess(src string) (proc *specs.Process, err error) {
+func ReadSpecProcess(src string) (*specs.Process, error) {
 	if src == "" {
 		return nil, nil
 	}
-	err = decodeFileJSON(proc, src)
-	return
+	proc := new(specs.Process)
+	err := decodeFileJSON(proc, src)
+	return proc, err
 }
