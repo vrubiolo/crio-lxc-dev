@@ -25,8 +25,9 @@ crio-lxc-start: cmd/start/crio-lxc-start.c
 	$(CC) -Werror -Wpedantic $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs --cflags lxc) -o $@ $?
 
 crio-lxc-init: cmd/init/crio-lxc-init.c
-	/usr/local/musl/bin/musl-gcc -Werror -Wpedantic -static -g -o $@ $?
+	/usr/bin/musl-gcc -Werror -Wpedantic -static -g -o $@ $?
 	#musl-gcc -g3 -Werror -static $? -o $@
+
 	# ensure that crio-lxc-init is statically compiled
 	! ldd $@  2>/dev/null
 
